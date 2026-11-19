@@ -171,6 +171,10 @@ typedef void (^FPick)(FlideItem *item);
 @property (nonatomic, strong) NSTimer *previewTimer;
 @property (nonatomic, assign) NSInteger textureFilter;      // 0 все, 1 иконки, 2 фоны, 3 заменённые
 @property (nonatomic, assign) BOOL pickingAccent;
+@property (nonatomic, assign) BOOL selecting;               // режим «выбрать несколько»
+@property (nonatomic, strong) NSMutableSet<NSString *> *selected;  // имена текстур
+@property (nonatomic, copy) void (^filesHandler)(NSArray<NSURL *> *urls);
+@property (nonatomic, copy) NSString *openPreset;           // открытый для просмотра пресет
 @end
 
 @implementation FlidePanelVC
@@ -460,7 +464,36 @@ static NSString *screenOf(NSString *path) {
         [ws setItemsReleasingOld:nil]; [ws.previewQueue removeAllObjects]; [ws reload];
     }];
     refresh.icon = @"arrow.clockwise";
-    [S addObject:[FSection title:nil rows:@[kind, refresh] footer:nil]];
+    if (!self.selected) self.selected = [NSMutableSet new];
+    FRow *sel = [FRow title:self.selecting ? [NSString stringWithFormat:L(@"Выбрано: %lu · готово"), (unsigned long)self.selected.count]
+                                           : L(@"Выбрать несколько")
+                        sub:self.selecting ? L(@"Нажми ещё раз, чтобы выйти из выбора") : L(@"Для автозамены сразу многих текстур")
+                     action:^(UIView *v) { ws.selecting = !ws.selecting; if (!ws.selecting) [ws.selected removeAllObjects]; [ws reload]; }];
+    sel.icon = @"checkmark.circle";
+    NSMutableArray *top = [NSMutableArray arrayWithObjects:kind, refresh, sel, nil];
+    if (self.selecting) {
+        FRow *all = [FRow title:L(@"Выбрать все видимые") sub:nil action:^(UIView *v) {
+            for (FlideItem *it in [ws filtered]) [ws.selected addObject:it.name];
+            [ws reload];
+        }];
+        all.icon = @"checklist";
+        [top addObject:all];
+        if (self.selected.count) {
+            FRow *go = [FRow title:[NSString stringWithFormat:L(@"Заменить выбранные (%lu)…"), (unsigned long)self.selected.count] sub:nil
+                            action:^(UIView *v) { [ws batchMenu:v]; }];
+            go.icon = @"wand.and.stars";
+            [top addObject:go];
+        }
+    }
+    NSString *rec = [[FlidePacks shared] recordingPreset];
+    if (rec) {
+        FRow *r = [FRow title:[NSString stringWithFormat:L(@"⏺ Запись в пресет «%@»"), [[FlidePacks shared] titleOf:rec]]
+                          sub:L(@"Все замены сохраняются в пресет. Нажми, чтобы остановить") action:^(UIView *v) {
+            [[FlidePacks shared] setRecordingPreset:nil]; [ws reload];
+        }];
+        [top addObject:r];
+    }
+    [S addObject:[FSection title:nil rows:top footer:nil]];
     NSMutableArray *rows = [NSMutableArray new];
     for (FlideItem *it in [self filtered]) {
         if (self.textureFilter) {
@@ -471,7 +504,14 @@ static NSString *screenOf(NSString *path) {
             if (self.textureFilter == 3 && !replaced[it.name] && ![it.name isEqualToString:anim]) continue;
         }
         NSString *mark = [it.name isEqualToString:anim] ? L(@" · 🎞 анимация") : (replaced[it.name] ? L(@" · заменена ✓") : @"");
-        FRow *r = [FRow title:it.name sub:[it.detail stringByAppendingString:mark] action:^(UIView *v) {
+        BOOL on = [self.selected containsObject:it.name];
+        NSString *title = self.selecting ? [NSString stringWithFormat:@"%@ %@", on ? @"☑︎" : @"☐", it.name] : it.name;
+        FRow *r = [FRow title:title sub:[it.detail stringByAppendingString:mark] action:^(UIView *v) {
+            if (ws.selecting) {
+                if ([ws.selected containsObject:it.name]) [ws.selected removeObject:it.name]; else [ws.selected addObject:it.name];
+                [ws reload];
+                return;
+            }
             FlideTextureEditor *e = [FlideTextureEditor editorForItem:it onChange:^{ it.preview = nil; [ws.previewQueue removeObject:@(it.instanceID)]; [ws reload]; }];
             [ws presentViewController:e animated:YES completion:nil];
         }];
@@ -482,6 +522,112 @@ static NSString *screenOf(NSString *path) {
         ? L(@"Превью отключены после вылета (включить: «Главное → Восстановить»). Замена работает.")
         : L(@"Нажми на текстуру — откроется редактор с предпросмотром: фото, фильтры, перекраска, анимация.");
     [S addObject:[FSection title:[NSString stringWithFormat:L(@"Текстуры · %lu"), (unsigned long)rows.count] rows:rows footer:footer]];
+}
+
+- (NSArray<FlideItem *> *)selectedItems {
+    NSMutableArray *out = [NSMutableArray new];
+    for (FlideItem *it in self.items) if ([self.selected containsObject:it.name]) [out addObject:it];
+    return out;
+}
+
+- (void)batchDone:(NSUInteger)n {
+    NSString *rec = [[FlidePacks shared] recordingPreset];
+    NSString *msg = rec ? [NSString stringWithFormat:L(@"Заменено: %lu · сохранено в «%@»"), (unsigned long)n, [[FlidePacks shared] titleOf:rec]]
+                        : [NSString stringWithFormat:L(@"Заменено: %lu"), (unsigned long)n];
+    [self toast:msg];
+    [self.selected removeAllObjects];
+    self.selecting = NO;
+    [self.previewQueue removeAllObjects];
+    for (FlideItem *it in self.items) it.preview = nil;
+    [self reload];
+}
+
+- (void)batchMenu:(UIView *)src {
+    __weak typeof(self) ws = self;
+    NSArray *targets = [self selectedItems];
+    NSArray *opts = @[L(@"🔍 Автозамена по слову (ивент)"), L(@"🎮 Одной текстурой из игры"), L(@"📁 PNG из «Файлов»"),
+                      L(@"🖼 Одной картинкой из Фото"), L(@"💾 Сохранить выбранные в пресет"), L(@"↺ Вернуть выбранным оригинал")];
+    [self choose:L(@"Заменить выбранные") options:opts source:src done:^(NSInteger i) {
+        FlidePacks *P = [FlidePacks shared];
+        if (i == 0) {
+            [ws ask:L(@"Слово ивента в названиях текстур") placeholder:L(@"например: halloween, xmas, event") done:^(NSString *kw) {
+                NSDictionary *map = [P matchTargets:targets among:ws.items keyword:kw];
+                if (!map.count) { [ws toast:L(@"Пар не найдено. Открой экран, где есть ивентовые текстуры, и обнови список")]; return; }
+                [ws batchDone:[P replaceTargets:targets withSources:map]];
+            }];
+        } else if (i == 1) {
+            [ws startTexturePick:^(FlideItem *src) {
+                NSMutableDictionary *map = [NSMutableDictionary new];
+                for (FlideItem *t in targets) if (t != src) map[t.name] = src;
+                [ws batchDone:[P replaceTargets:targets withSources:map]];
+            }];
+        } else if (i == 2) {
+            [ws pickFiles:^(NSArray<NSURL *> *urls) { [ws batchDone:[P replaceTargets:targets withFiles:urls]]; }];
+        } else if (i == 3) {
+            [ws pickPhoto:^(UIImage *img) {
+                NSUInteger n = 0;
+                for (FlideItem *t in targets) if ([[FlideEngine shared] replaceTexture:t withImage:img]) n++;
+                [ws batchDone:n];
+            }];
+        } else if (i == 4) {
+            [ws pickPreset:L(@"В какой пресет сохранить") then:^(NSString *pid) {
+                NSUInteger n = 0;
+                for (FlideItem *t in targets) @autoreleasepool {
+                    UIImage *img = [[FlideEngine shared] imageOfTexture:t maxSide:4096];
+                    if (!img) continue;
+                    NSString *f = [[FlideDir(@"packs") stringByAppendingPathComponent:pid] stringByAppendingPathComponent:
+                                   [FlideSafeName(t.name) stringByAppendingPathExtension:@"png"]];
+                    if ([UIImagePNGRepresentation(img) writeToFile:f atomically:YES]) n++;
+                }
+                [ws toast:[NSString stringWithFormat:L(@"В пресет «%@» добавлено: %lu"), [P titleOf:pid], (unsigned long)n]];
+                [ws.selected removeAllObjects]; ws.selecting = NO; [ws reload];
+            }];
+        } else {
+            NSUInteger n = 0;
+            for (FlideItem *t in targets) if ([[FlideEngine shared] resetTexture:t]) n++;
+            [ws batchDone:n];
+        }
+    }];
+}
+
+// выбор одной текстуры-источника из этого же списка
+- (void)startTexturePick:(void (^)(FlideItem *src))done {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:L(@"Текстура-источник")
+        message:L(@"Введи часть названия текстуры, на которую заменить") preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.placeholder = L(@"например: halloween_card"); }];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) ws = self;
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Найти") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        NSString *q = a.textFields.firstObject.text;
+        NSMutableArray *found = [NSMutableArray new];
+        for (FlideItem *it in ws.items) if (q.length && [it.name localizedCaseInsensitiveContainsString:q]) [found addObject:it];
+        if (!found.count) { [ws toast:L(@"Не найдено")]; return; }
+        NSMutableArray *names = [NSMutableArray new];
+        for (FlideItem *it in [found subarrayWithRange:NSMakeRange(0, MIN(found.count, 12))])
+            [names addObject:[NSString stringWithFormat:@"%@ · %@", it.name, it.detail]];
+        [ws choose:L(@"Заменить на") options:names source:ws.view done:^(NSInteger i) { done(found[i]); }];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)pickFiles:(void (^)(NSArray<NSURL *> *urls))done {
+    self.filesHandler = done;
+    UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder, UTTypePNG] asCopy:NO];
+    p.allowsMultipleSelection = YES;
+    p.delegate = self;
+    [self presentViewController:p animated:YES completion:nil];
+}
+
+- (void)pickPreset:(NSString *)title then:(void (^)(NSString *pid))done {
+    FlidePacks *P = [FlidePacks shared];
+    NSArray *packs = [P packs];
+    NSMutableArray *names = [NSMutableArray arrayWithObject:L(@"＋ Новый пресет")];
+    for (NSString *p in packs) [names addObject:[NSString stringWithFormat:@"%@ %@", [P iconOf:p], [P titleOf:p]]];
+    __weak typeof(self) ws = self;
+    [self choose:title options:names source:self.view done:^(NSInteger i) {
+        if (i > 0) { done(packs[i - 1]); return; }
+        [ws ask:L(@"Название пресета") placeholder:L(@"Например: Хэллоуин") done:^(NSString *t) { done([P createPreset:t icon:@"📦"]); }];
+    }];
 }
 
 #pragma mark Тексты
@@ -749,36 +895,86 @@ static NSString *screenOf(NSString *path) {
                           footer:L(@"Фильтр сразу ко всем текстурам на экране. Идёт по одной, игра не зависает. Шрифты не трогаются.")]];
 
     NSString *active = [FDefaults() stringForKey:kPackActive];
+    NSString *rec = [P recordingPreset];
+
+    if (self.openPreset) { // просмотр одного пресета
+        NSString *pid = self.openPreset;
+        NSMutableArray *rows = [NSMutableArray arrayWithObject:[FRow title:L(@"← Назад") sub:nil action:^(UIView *v) {
+            ws.openPreset = nil; [ws reload];
+        }]];
+        for (NSString *t in [P texturesIn:pid]) {
+            FRow *r = [FRow title:t sub:L(@"Нажми, чтобы убрать из пресета") action:^(UIView *v) {
+                [P removeTexture:t fromPreset:pid]; [ws reload];
+            }];
+            r.icon = @"photo";
+            [rows addObject:r];
+        }
+        [S addObject:[FSection title:[NSString stringWithFormat:@"%@ %@", [P iconOf:pid], [P titleOf:pid]] rows:rows
+                              footer:L(@"Добавлять: «🖼 Текстуры» → «Выбрать несколько» → «Сохранить в пресет», или включи запись.")]];
+        return;
+    }
+
     NSMutableArray *packs = [NSMutableArray new];
     for (NSString *p in [P packs]) {
-        BOOL on = [p isEqualToString:active];
-        [packs addObject:[FRow title:[NSString stringWithFormat:@"%@%@", on ? @"✅ " : @"📦 ", p] sub:on ? L(@"Включён") : nil action:^(UIView *v) {
-            [ws choose:p options:on ? @[L(@"Выключить"), L(@"Поделиться (zip)"), L(@"Удалить")] : @[L(@"Включить"), L(@"Поделиться (zip)"), L(@"Удалить")] source:v done:^(NSInteger i) {
+        BOOL on = [p isEqualToString:active], recording = [p isEqualToString:rec];
+        NSString *sub = [NSString stringWithFormat:L(@"%lu текстур%@%@"), (unsigned long)[P countOf:p],
+                         on ? L(@" · включён") : @"", recording ? L(@" · ⏺ запись") : @""];
+        FRow *r = [FRow title:[NSString stringWithFormat:@"%@ %@", [P iconOf:p], [P titleOf:p]] sub:sub action:^(UIView *v) {
+            NSArray *opts = @[on ? L(@"Выключить") : L(@"▶︎ Применить"),
+                              recording ? L(@"⏹ Остановить запись") : L(@"⏺ Записывать замены сюда"),
+                              L(@"✏️ Переименовать"), L(@"🎨 Иконка"), L(@"👁 Что внутри"), L(@"⧉ Дублировать"),
+                              L(@"Поделиться (zip)"), L(@"Удалить")];
+            [ws choose:[P titleOf:p] options:opts source:v done:^(NSInteger i) {
                 NSString *dir = [FlideDir(@"packs") stringByAppendingPathComponent:p];
-                if (i == 0) {
-                    if (on) { [P deactivatePack]; [ws toast:L(@"Пак выключен")]; }
-                    else [ws toast:[NSString stringWithFormat:L(@"Подставлено текстур: %lu"), (unsigned long)[P activatePack:p]]];
-                } else if (i == 1) {
-                    NSURL *zip = [P zipFolder:dir];
-                    if (zip) [ws share:@[zip] source:v];
-                } else {
-                    if (on) [P deactivatePack];
-                    [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+                switch (i) {
+                    case 0:
+                        if (on) { [P deactivatePack]; [ws toast:L(@"Пак выключен")]; }
+                        else [ws toast:[NSString stringWithFormat:L(@"Подставлено текстур: %lu"), (unsigned long)[P activatePack:p]]];
+                        break;
+                    case 1: [P setRecordingPreset:recording ? nil : p];
+                        if (!recording) [ws toast:L(@"Запись включена: все замены текстур попадут в этот пресет")];
+                        break;
+                    case 2: [ws ask:L(@"Новое название") placeholder:[P titleOf:p] done:^(NSString *t) { [P rename:p to:t]; [ws reload]; }]; return;
+                    case 3: {
+                        NSArray *icons = @[@"📦", @"🎃", @"🎄", @"💖", @"🌸", @"🌌", @"🔥", @"❄️", @"👑", @"🎮", @"⭐️", @"🌴"];
+                        [ws choose:L(@"Иконка") options:icons source:v done:^(NSInteger k) { [P setIcon:icons[k] of:p]; [ws reload]; }];
+                        return;
+                    }
+                    case 4: ws.openPreset = p; break;
+                    case 5: [P duplicate:p]; break;
+                    case 6: { NSURL *zip = [P zipFolder:dir]; if (zip) [ws share:@[zip] source:v]; return; }
+                    default:
+                        if (on) [P deactivatePack];
+                        if (recording) [P setRecordingPreset:nil];
+                        [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
                 }
                 [ws reload];
             }];
-        }]];
+        }];
+        [packs addObject:r];
     }
+    FRow *add = [FRow title:L(@"＋ Новый пресет") sub:L(@"Пустой — потом добавишь замены") action:^(UIView *v) {
+        [ws ask:L(@"Название пресета") placeholder:L(@"Например: Хэллоуин") done:^(NSString *t) {
+            NSString *pid = [P createPreset:t icon:@"📦"];
+            [P setRecordingPreset:pid];
+            [ws toast:L(@"Пресет создан, запись включена — меняй текстуры, они сохранятся сюда")];
+            [ws reload];
+        }];
+    }];
+    add.icon = @"plus.circle";
+    [packs addObject:add];
     [packs addObject:[FRow title:L(@"📥 Импорт пака из «Файлов»") sub:L(@"Папка с PNG (распакуй zip в «Файлах»)") action:^(UIView *v) { [ws importPack]; }]];
     [packs addObject:[FRow title:L(@"💾 Сохранить мою тему как пак") sub:L(@"Замены + тексты + ауры + цвета") action:^(UIView *v) {
         [ws ask:L(@"Название пака") placeholder:L(@"Моя тема") done:^(NSString *t) {
             NSURL *u = [P savePresetNamed:t];
+            if (u) [P rename:u.lastPathComponent to:t];
             NSURL *zip = u ? [P zipFolder:u.path] : nil;
             [ws reload];
             if (zip) [ws share:@[zip] source:v];
         }];
     }]];
-    [S addObject:[FSection title:L(@"Паки") rows:packs footer:L(@"Пак можно скинуть другу — он импортирует его у себя.")]];
+    [S addObject:[FSection title:L(@"🗂 Пресеты") rows:packs
+                          footer:L(@"Пресет — набор замен в одно нажатие. Создай, включи запись и меняй текстуры (или «Выбрать несколько» → автозамена). Потом просто «Применить».")]];
 
     [S addObject:[FSection title:L(@"✨ HD-пак (апскейл нейросетью)") rows:@[
         [FRow title:L(@"1. Экспортировать все текстуры в zip") sub:L(@"Сохрани zip в «Файлы»") action:^(UIView *v) {
@@ -819,6 +1015,7 @@ static NSString *screenOf(NSString *path) {
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    if (self.filesHandler) { void (^h)(NSArray *) = self.filesHandler; self.filesHandler = nil; h(urls); return; }
     __weak typeof(self) ws = self;
     NSString *guess = urls.count == 1 && urls.firstObject.hasDirectoryPath ? urls.firstObject.lastPathComponent : L(@"Мой пак");
     [self ask:L(@"Название пака") placeholder:guess done:^(NSString *t) {

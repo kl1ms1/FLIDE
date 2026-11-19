@@ -140,6 +140,24 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (NSURL *)savePresetNamed:(NSString *)name;          // текущие замены + настройки → пак
 - (NSUInteger)importFromURLs:(NSArray<NSURL *> *)urls asPack:(NSString *)name;
 - (NSURL *)zipFolder:(NSString *)path;                // zip для выгрузки (HD-апскейл)
+// пресеты: у пака есть имя, иконка и режим записи
+- (NSString *)titleOf:(NSString *)pack;
+- (NSString *)iconOf:(NSString *)pack;
+- (NSUInteger)countOf:(NSString *)pack;
+- (void)rename:(NSString *)pack to:(NSString *)name;
+- (void)setIcon:(NSString *)icon of:(NSString *)pack;
+- (NSString *)createPreset:(NSString *)name icon:(NSString *)icon;
+- (NSString *)duplicate:(NSString *)pack;
+- (NSArray<NSString *> *)texturesIn:(NSString *)pack;
+- (void)removeTexture:(NSString *)texture fromPreset:(NSString *)pack;
+- (NSString *)recordingPreset;
+- (void)setRecordingPreset:(NSString *)pack;
+- (void)recordReplacement:(NSString *)texture png:(NSData *)png;
+// автозамена
+- (NSDictionary<NSString *, FlideItem *> *)matchTargets:(NSArray<FlideItem *> *)targets
+                                                  among:(NSArray<FlideItem *> *)sources keyword:(NSString *)kw;
+- (NSUInteger)replaceTargets:(NSArray<FlideItem *> *)targets withSources:(NSDictionary<NSString *, FlideItem *> *)map;
+- (NSUInteger)replaceTargets:(NSArray<FlideItem *> *)targets withFiles:(NSArray<NSURL *> *)urls;
 // темы — фильтр сразу ко всем текстурам
 @property (nonatomic, readonly) BOOL themeRunning;
 - (void)applyTheme:(NSInteger)filter progress:(void (^)(NSUInteger done, NSUInteger total))progress;

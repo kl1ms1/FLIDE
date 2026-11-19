@@ -165,6 +165,141 @@ static NSArray<NSString *> *pngsIn(NSString *dir) {
     return result;
 }
 
+#pragma mark - пресеты (пак + имя, иконка, запись)
+
+static NSString *const kPresetRec = @"flide.preset.rec";
+
+- (NSString *)dirOf:(NSString *)pack { return [FlideDir(@"packs") stringByAppendingPathComponent:pack]; }
+
+- (NSDictionary *)metaOf:(NSString *)pack {
+    NSData *d = [NSData dataWithContentsOfFile:[[self dirOf:pack] stringByAppendingPathComponent:@"preset.json"]];
+    NSDictionary *m = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+    return [m isKindOfClass:NSDictionary.class] ? m : @{};
+}
+
+- (void)setMeta:(NSDictionary *)meta of:(NSString *)pack {
+    NSMutableDictionary *m = [[self metaOf:pack] mutableCopy];
+    [m addEntriesFromDictionary:meta];
+    [[NSJSONSerialization dataWithJSONObject:m options:NSJSONWritingPrettyPrinted error:nil]
+        writeToFile:[[self dirOf:pack] stringByAppendingPathComponent:@"preset.json"] atomically:YES];
+}
+
+- (NSString *)titleOf:(NSString *)pack { return [self metaOf:pack][@"name"] ?: pack; }
+- (NSString *)iconOf:(NSString *)pack { return [self metaOf:pack][@"icon"] ?: @"📦"; }
+- (void)rename:(NSString *)pack to:(NSString *)name { [self setMeta:@{@"name": name} of:pack]; }
+- (void)setIcon:(NSString *)icon of:(NSString *)pack { [self setMeta:@{@"icon": icon} of:pack]; }
+- (NSUInteger)countOf:(NSString *)pack { return pngsIn([self dirOf:pack]).count; }
+
+- (NSString *)createPreset:(NSString *)name icon:(NSString *)icon {
+    NSString *pid = [NSString stringWithFormat:@"%@_%.0f", FlideSafeName(name), NSDate.date.timeIntervalSince1970];
+    [NSFileManager.defaultManager createDirectoryAtPath:[self dirOf:pid] withIntermediateDirectories:YES attributes:nil error:nil];
+    [self setMeta:@{@"name": name, @"icon": icon ?: @"📦"} of:pid];
+    return pid;
+}
+
+- (NSString *)duplicate:(NSString *)pack {
+    NSString *pid = [self createPreset:[[self titleOf:pack] stringByAppendingString:L(@" (копия)")] icon:[self iconOf:pack]];
+    for (NSString *f in pngsIn([self dirOf:pack]))
+        [NSFileManager.defaultManager copyItemAtPath:f toPath:[[self dirOf:pid] stringByAppendingPathComponent:f.lastPathComponent] error:nil];
+    return pid;
+}
+
+- (void)removeTexture:(NSString *)texture fromPreset:(NSString *)pack {
+    [NSFileManager.defaultManager removeItemAtPath:[[self dirOf:pack] stringByAppendingPathComponent:
+                                                    [FlideSafeName(texture) stringByAppendingPathExtension:@"png"]] error:nil];
+}
+
+- (NSArray<NSString *> *)texturesIn:(NSString *)pack {
+    NSMutableArray *out = [NSMutableArray new];
+    for (NSString *f in pngsIn([self dirOf:pack])) [out addObject:f.lastPathComponent.stringByDeletingPathExtension];
+    return [out sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+}
+
+- (NSString *)recordingPreset {
+    NSString *p = [FDefaults() stringForKey:kPresetRec];
+    return p && [NSFileManager.defaultManager fileExistsAtPath:[self dirOf:p]] ? p : nil;
+}
+- (void)setRecordingPreset:(NSString *)pack {
+    if (pack) [FDefaults() setObject:pack forKey:kPresetRec]; else [FDefaults() removeObjectForKey:kPresetRec];
+}
+
+- (void)recordReplacement:(NSString *)texture png:(NSData *)png {
+    NSString *p = [self recordingPreset];
+    if (!p || !png || self.themeRunning) return; // темы в пресет не пишем
+    [png writeToFile:[[self dirOf:p] stringByAppendingPathComponent:[FlideSafeName(texture) stringByAppendingPathExtension:@"png"]] atomically:YES];
+}
+
+#pragma mark - автозамена
+
+static NSString *normName(NSString *n, NSString *strip) {
+    NSString *s = n.lowercaseString;
+    if (strip.length) s = [s stringByReplacingOccurrencesOfString:strip.lowercaseString withString:@""];
+    NSCharacterSet *junk = [NSCharacterSet characterSetWithCharactersInString:@"_-. ()[]"];
+    return [[s componentsSeparatedByCharactersInSet:junk] componentsJoinedByString:@""];
+}
+
+// Для каждой цели ищем источник с тем же именем, но с «словом ивента»:
+// card_red_1 ← halloween_card_red_1 / card_red_1_halloween / CardRed1Halloween
+- (NSDictionary<NSString *, FlideItem *> *)matchTargets:(NSArray<FlideItem *> *)targets
+                                                  among:(NSArray<FlideItem *> *)sources keyword:(NSString *)kw {
+    NSMutableDictionary *byNorm = [NSMutableDictionary new];
+    NSString *k = kw.lowercaseString;
+    for (FlideItem *s in sources) {
+        if (k.length && ![s.name.lowercaseString containsString:k]) continue;
+        byNorm[normName(s.name, kw)] = s;
+    }
+    NSMutableDictionary *out = [NSMutableDictionary new];
+    for (FlideItem *t in targets) {
+        if (k.length && [t.name.lowercaseString containsString:k]) continue; // уже ивентовая
+        FlideItem *src = byNorm[normName(t.name, nil)];
+        if (src && src != t) out[t.name] = src;
+    }
+    return out;
+}
+
+- (NSUInteger)replaceTargets:(NSArray<FlideItem *> *)targets withSources:(NSDictionary<NSString *, FlideItem *> *)map {
+    NSUInteger n = 0;
+    FlideEngine *E = [FlideEngine shared];
+    NSMutableDictionary *cache = [NSMutableDictionary new];
+    for (FlideItem *t in targets) @autoreleasepool {
+        FlideItem *src = map[t.name];
+        if (!src) continue;
+        UIImage *img = cache[src.name] ?: [E imageOfTexture:src maxSide:4096];
+        if (!img) continue;
+        cache[src.name] = img;
+        if ([E replaceTexture:t withImage:img]) n++;
+    }
+    return n;
+}
+
+- (NSUInteger)replaceTargets:(NSArray<FlideItem *> *)targets withFiles:(NSArray<NSURL *> *)urls {
+    NSMutableArray *files = [NSMutableArray new];
+    for (NSURL *u in urls) {
+        BOOL scoped = [u startAccessingSecurityScopedResource];
+        BOOL isDir = NO;
+        [NSFileManager.defaultManager fileExistsAtPath:u.path isDirectory:&isDir];
+        for (NSString *f in isDir ? pngsIn(u.path) : @[u.path]) {
+            NSData *d = [NSData dataWithContentsOfFile:f];
+            UIImage *img = d ? [UIImage imageWithData:d] : nil;
+            if (img) [files addObject:@[f.lastPathComponent.stringByDeletingPathExtension, img]];
+        }
+        if (scoped) [u stopAccessingSecurityScopedResource];
+    }
+    NSMutableDictionary *byNorm = [NSMutableDictionary new];
+    for (NSArray *f in files) byNorm[normName(f[0], nil)] = f[1];
+    NSUInteger n = 0;
+    FlideEngine *E = [FlideEngine shared];
+    BOOL byOrder = YES;
+    for (FlideItem *t in targets) if (byNorm[normName(t.name, nil)]) { byOrder = NO; break; }
+    for (NSUInteger i = 0; i < targets.count; i++) @autoreleasepool {
+        FlideItem *t = targets[i];
+        UIImage *img = byOrder ? (i < files.count ? files[i][1] : nil) : byNorm[normName(t.name, nil)];
+        // если имена не совпали ни разу — подставляем по порядку
+        if (img && [E replaceTexture:t withImage:img]) n++;
+    }
+    return n;
+}
+
 #pragma mark - темы
 
 static BOOL skipForTheme(FlideItem *it) {

@@ -242,6 +242,7 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     [self.replacedIDs addObject:@(item.instanceID)];
     self.seenTex = nil; // другие копии с тем же именем подхватятся на следующем тике
     item.preview = nil;
+    [[FlidePacks shared] recordReplacement:item.name png:png]; // если включена запись пресета
     return YES;
 }
 
