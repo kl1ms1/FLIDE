@@ -73,6 +73,7 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (void)start;
 - (void)reloadRules;
 - (void)burstAt:(CGPoint)p big:(BOOL)big;
+- (void)cardThrownAt:(CGPoint)p;
 @end
 
 // ---------- меню ----------
