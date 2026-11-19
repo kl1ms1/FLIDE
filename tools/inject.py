@@ -34,6 +34,14 @@ def main() -> None:
         exe = app / info["CFBundleExecutable"]
         print(f"app: {info['CFBundleIdentifier']} {info.get('CFBundleShortVersionString')}")
 
+        # «Файлы» видят Documents (экспорт текстур), ProMotion до 120 Гц
+        info.update({
+            "UIFileSharingEnabled": True,
+            "LSSupportsOpeningDocumentsInPlace": True,
+            "CADisableMinimumFrameDurationOnPhone": True,
+        })
+        (app / "Info.plist").write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+
         fw = app / "Frameworks"
         fw.mkdir(exist_ok=True)
 

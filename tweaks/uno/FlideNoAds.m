@@ -15,7 +15,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-#define FLog(fmt, ...) NSLog(@"[FLIDE] " fmt, ##__VA_ARGS__)
+#import "FlideCore.h"
 
 // ---------- helpers ----------
 
@@ -100,7 +100,7 @@ static void gadLoadFail(id self, SEL _cmd, NSString *unitID, id request, GADLoad
 
 static void installHooks(void) {
     static BOOL done = NO;
-    if (done) return;
+    if (done || !FBool(kNoAds)) return;
     // рекламные SDK живут в UnityFramework, который Unity грузит уже после старта
     if (!NSClassFromString(@"MAInterstitialAd") && !NSClassFromString(@"GADInterstitialAd")) return;
     done = YES;
@@ -151,7 +151,10 @@ static void installHooks(void) {
 
 __attribute__((constructor))
 static void flideInit(void) {
+    [FDefaults() registerDefaults:@{ kNoAds: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF" }];
     installHooks();
+    [[FlideEngine shared] start];
+    [FlideMenu install];
     [[NSNotificationCenter defaultCenter] addObserverForName:NSBundleDidLoadNotification
         object:nil queue:nil usingBlock:^(NSNotification *n) { installHooks(); }];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
