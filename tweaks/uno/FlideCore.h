@@ -18,6 +18,7 @@
 #define kTextures   @"flide.textures"  // texture name -> file name
 #define kBoot       @"flide.boot"
 #define kBootSeconds @"flide.boot.seconds"
+#define kSpoof      @"flide.clone.spoof"
 
 static inline NSUserDefaults *FDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static inline BOOL FBool(NSString *k) { return [FDefaults() boolForKey:k]; }
@@ -77,6 +78,11 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (void)burstAt:(CGPoint)p big:(BOOL)big;
 - (void)cardThrownAt:(CGPoint)p;
 @end
+
+// ---------- режим клона ----------
+void FlideCloneInstall(void);
+NSString *FlideRealBundleID(void);
+BOOL FlideIsClone(void);
 
 // ---------- бут-лого ----------
 @interface FlideBoot : NSObject

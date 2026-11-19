@@ -151,7 +151,8 @@ static void installHooks(void) {
 
 __attribute__((constructor))
 static void flideInit(void) {
-    [FDefaults() registerDefaults:@{ kNoAds: @YES, kBoot: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF" }];
+    [FDefaults() registerDefaults:@{ kNoAds: @YES, kBoot: @YES, kSpoof: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF" }];
+    FlideCloneInstall();   // первым делом, до SDK
     installHooks();
     [[FlideEngine shared] start];
     [FlideMenu install];

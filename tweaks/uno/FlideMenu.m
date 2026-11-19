@@ -205,6 +205,10 @@ typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabFX };
         [S addObject:[FSection title:@"Чистота" rows:@[
             [FRow toggle:@"Без рекламы" sub:@"Межстраничная и баннеры. Нужен перезапуск" key:kNoAds],
         ] footer:@"Реклама за награду остаётся — смотришь, только если сам хочешь бонус."]];
+        if (FlideIsClone())
+            [S addObject:[FSection title:@"Клон" rows:@[
+                [FRow toggle:@"Маскировка Bundle ID" sub:[NSString stringWithFormat:@"%@ → com.mattel163.uno", FlideRealBundleID()] key:kSpoof],
+            ] footer:@"Живёт рядом с обычным UNO. Игра видит оригинальный ID — вход и сохранения работают. Нужен перезапуск."]];
         NSMutableArray *boot = [NSMutableArray arrayWithObjects:
             [FRow toggle:@"Бут-лого при запуске" sub:@"Анимированная заставка FLIDE" key:kBoot],
             [FRow title:@"Своя картинка" sub:[FlideBoot hasCustomImage] ? @"Стоит своя ✓" : @"Сейчас стандартное ✦ FLIDE"
