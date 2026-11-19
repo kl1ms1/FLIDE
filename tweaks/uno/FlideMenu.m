@@ -934,7 +934,10 @@ static NSString *screenOf(NSString *path) {
                     case 1: [P setRecordingPreset:recording ? nil : p];
                         if (!recording) [ws toast:L(@"Запись включена: все замены текстур попадут в этот пресет")];
                         break;
-                    case 2: [ws ask:L(@"Новое название") placeholder:[P titleOf:p] done:^(NSString *t) { [P rename:p to:t]; [ws reload]; }]; return;
+                    case 2: {
+                        [ws ask:L(@"Новое название") placeholder:[P titleOf:p] done:^(NSString *t) { [P rename:p to:t]; [ws reload]; }];
+                        return;
+                    }
                     case 3: {
                         NSArray *icons = @[@"📦", @"🎃", @"🎄", @"💖", @"🌸", @"🌌", @"🔥", @"❄️", @"👑", @"🎮", @"⭐️", @"🌴"];
                         [ws choose:L(@"Иконка") options:icons source:v done:^(NSInteger k) { [P setIcon:icons[k] of:p]; [ws reload]; }];
