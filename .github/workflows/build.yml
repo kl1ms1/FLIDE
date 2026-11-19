@@ -1,0 +1,76 @@
+name: Build tweaked IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Папка твика в tweaks/ (например: uno)"
+        required: true
+        default: uno
+      release_tag:
+        description: "Тег релиза с расшифрованным .ipa"
+        required: true
+        default: IPA
+      asset:
+        description: "Имя или маска .ipa в релизе"
+        required: true
+        default: "*uno*.ipa"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      APP: ${{ inputs.app }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile tweak
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          SRC=$(ls tweaks/"$APP"/*.m)
+          echo "sources: $SRC"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -miphoneos-version-min=15.0 \
+            -dynamiclib -fobjc-arc -O2 \
+            -framework Foundation -framework UIKit \
+            -install_name "@executable_path/Frameworks/FLIDE-$APP.dylib" \
+            -o "build/FLIDE-$APP.dylib" $SRC
+          codesign -f -s - "build/FLIDE-$APP.dylib"
+          file "build/FLIDE-$APP.dylib"
+
+      - name: Download IPA
+        run: |
+          set -euo pipefail
+          gh release download "${{ inputs.release_tag }}" \
+            --repo "$GITHUB_REPOSITORY" --pattern "${{ inputs.asset }}" --dir in
+          ls -la in
+          IPA=$(ls in/*.ipa | head -1)
+          echo "IPA=$IPA" >> "$GITHUB_ENV"
+
+      - name: Inject
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --break-system-packages lief
+          OUT="out/$(basename "${IPA%.ipa}")_FLIDE.ipa"
+          python3 tools/inject.py "$IPA" "$OUT" "build/FLIDE-$APP.dylib"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLIDE-${{ inputs.app }}-ipa
+          path: ${{ env.OUT }}
+          compression-level: 0
+          retention-days: 3
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLIDE-${{ inputs.app }}-dylib
+          path: build/FLIDE-${{ inputs.app }}.dylib
+          retention-days: 30

@@ -1,0 +1,159 @@
+// FLIDE · UNO! — убираем межстраничную рекламу и баннеры.
+//
+// Что делаем:
+//   • Interstitial (полноэкранная реклама между матчами) — не грузится и «не готова».
+//   • Banner — не грузится и скрыт.
+// Чего НЕ делаем:
+//   • Rewarded (реклама за награду) не трогаем: хочешь бонус — смотришь рекламу сам.
+//   • Покупки, валюту и серверную логику не трогаем.
+//
+// Без зависимостей (Substrate/ElleKit не нужен) — только Objective-C runtime.
+// Каждый хук ставится, только если класс и метод реально есть в приложении.
+
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+
+#define FLog(fmt, ...) NSLog(@"[FLIDE] " fmt, ##__VA_ARGS__)
+
+// ---------- helpers ----------
+
+static BOOL hookOn(Class cls, NSString *clsName, NSString *selName, IMP newImp, IMP *orig) {
+    if (!cls) return NO;
+    SEL sel = NSSelectorFromString(selName);
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return NO;
+    IMP old = method_getImplementation(m);
+    // если метод унаследован — добавляем свой в этот класс, родителя не трогаем
+    if (!class_addMethod(cls, sel, newImp, method_getTypeEncoding(m))) {
+        method_setImplementation(m, newImp);
+    }
+    if (orig) *orig = old;
+    FLog(@"hooked %@ %@", clsName, selName);
+    return YES;
+}
+
+static BOOL hookInstance(NSString *clsName, NSString *selName, IMP newImp, IMP *orig) {
+    return hookOn(NSClassFromString(clsName), clsName, selName, newImp, orig);
+}
+
+static BOOL hookClass(NSString *clsName, NSString *selName, IMP newImp) {
+    Class cls = NSClassFromString(clsName);
+    return cls ? hookOn(object_getClass(cls), clsName, selName, newImp, NULL) : NO;
+}
+
+// на arm64 лишние аргументы просто игнорируются — одна заглушка на любые сигнатуры
+static void noop(id self, SEL _cmd) {}
+static BOOL returnNO(id self, SEL _cmd) { return NO; }
+
+static NSError *flideError(void) {
+    return [NSError errorWithDomain:@"FLIDE" code:-1
+                           userInfo:@{NSLocalizedDescriptionKey: @"Ad blocked by FLIDE"}];
+}
+
+// ---------- banners: держим скрытыми ----------
+
+static NSMutableDictionary<NSString *, NSValue *> *gOrigDidMove;
+static NSMutableDictionary<NSString *, NSValue *> *gOrigSetHidden;
+
+static IMP origFor(NSDictionary *map, id obj) {
+    for (Class c = object_getClass(obj); c; c = class_getSuperclass(c)) {
+        NSValue *v = map[NSStringFromClass(c)];
+        if (v) return (IMP)v.pointerValue;
+    }
+    return NULL;
+}
+
+static void bannerDidMoveToWindow(UIView *self, SEL _cmd) {
+    IMP o = origFor(gOrigDidMove, self);
+    if (o) ((void (*)(id, SEL))o)(self, _cmd);
+    IMP h = origFor(gOrigSetHidden, self);
+    if (h) ((void (*)(id, SEL, BOOL))h)(self, @selector(setHidden:), YES);
+    self.alpha = 0;
+    self.userInteractionEnabled = NO;
+}
+
+static void bannerSetHidden(UIView *self, SEL _cmd, BOOL hidden) {
+    IMP o = origFor(gOrigSetHidden, self);
+    if (o) ((void (*)(id, SEL, BOOL))o)(self, _cmd, YES);
+}
+
+static void hideBannerClass(NSString *clsName) {
+    IMP o = NULL;
+    if (hookInstance(clsName, @"didMoveToWindow", (IMP)bannerDidMoveToWindow, &o))
+        gOrigDidMove[clsName] = [NSValue valueWithPointer:(void *)o];
+    o = NULL;
+    if (hookInstance(clsName, @"setHidden:", (IMP)bannerSetHidden, &o))
+        gOrigSetHidden[clsName] = [NSValue valueWithPointer:(void *)o];
+}
+
+// ---------- AdMob: загрузка сразу «падает» ----------
+
+typedef void (^GADLoadHandler)(id ad, NSError *error);
+
+static void gadLoadFail(id self, SEL _cmd, NSString *unitID, id request, GADLoadHandler handler) {
+    if (handler) dispatch_async(dispatch_get_main_queue(), ^{ handler(nil, flideError()); });
+}
+
+// ---------- entry ----------
+
+static void installHooks(void) {
+    static BOOL done = NO;
+    if (done) return;
+    // рекламные SDK живут в UnityFramework, который Unity грузит уже после старта
+    if (!NSClassFromString(@"MAInterstitialAd") && !NSClassFromString(@"GADInterstitialAd")) return;
+    done = YES;
+
+    gOrigDidMove   = [NSMutableDictionary new];
+    gOrigSetHidden = [NSMutableDictionary new];
+
+    // AppLovin MAX — interstitial
+    hookInstance(@"MAInterstitialAd", @"isReady", (IMP)returnNO, NULL);
+    hookInstance(@"MAInterstitialAd", @"loadAd", (IMP)noop, NULL);
+    for (NSString *s in @[@"showAd", @"showAdForPlacement:", @"showAdForPlacement:customData:",
+                          @"showAdForPlacement:customData:viewController:"])
+        hookInstance(@"MAInterstitialAd", s, (IMP)noop, NULL);
+
+    // AppLovin MAX — banner
+    hookInstance(@"MAAdView", @"loadAd", (IMP)noop, NULL);
+    hookInstance(@"MAAdView", @"startAutoRefresh", (IMP)noop, NULL);
+    hideBannerClass(@"MAAdView");
+
+    // Google AdMob — interstitial / app open / banner
+    hookClass(@"GADInterstitialAd", @"loadWithAdUnitID:request:completionHandler:", (IMP)gadLoadFail);
+    hookClass(@"GADAppOpenAd",      @"loadWithAdUnitID:request:completionHandler:", (IMP)gadLoadFail);
+    hookInstance(@"GADInterstitialAd", @"canPresentFromRootViewController:error:", (IMP)returnNO, NULL);
+    hookInstance(@"GADInterstitialAd", @"presentFromRootViewController:", (IMP)noop, NULL);
+    hookInstance(@"GADAppOpenAd",      @"presentFromRootViewController:", (IMP)noop, NULL);
+    hookInstance(@"GADBannerView", @"loadRequest:", (IMP)noop, NULL);
+    hideBannerClass(@"GADBannerView");
+
+    // IronSource / LevelPlay
+    hookInstance(@"LPMInterstitialAd", @"isAdReady", (IMP)returnNO, NULL);
+    hookInstance(@"LPMInterstitialAd", @"loadAd", (IMP)noop, NULL);
+    hookInstance(@"LPMInterstitialAd", @"showAdWithViewController:placementName:", (IMP)noop, NULL);
+    hookClass(@"IronSource", @"hasInterstitial", (IMP)returnNO);
+    hookClass(@"IronSource", @"loadInterstitial", (IMP)noop);
+    hookClass(@"IronSource", @"showInterstitialWithViewController:", (IMP)noop);
+    hookClass(@"IronSource", @"showInterstitialWithViewController:placement:", (IMP)noop);
+    hookInstance(@"LPMBannerAdView", @"loadAdWithViewController:", (IMP)noop, NULL);
+    hideBannerClass(@"LPMBannerAdView");
+    hideBannerClass(@"ISBannerView");
+
+    // Meta Audience Network
+    hookInstance(@"FBInterstitialAd", @"isAdValid", (IMP)returnNO, NULL);
+    hookInstance(@"FBInterstitialAd", @"showAdFromRootViewController:", (IMP)returnNO, NULL);
+    hideBannerClass(@"FBAdView");
+
+    FLog(@"UNO no-ads loaded ✦");
+}
+
+__attribute__((constructor))
+static void flideInit(void) {
+    installHooks();
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSBundleDidLoadNotification
+        object:nil queue:nil usingBlock:^(NSNotification *n) { installHooks(); }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
+        object:nil queue:nil usingBlock:^(NSNotification *n) { installHooks(); }];
+}

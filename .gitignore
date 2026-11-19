@@ -1,0 +1,7 @@
+build/
+out/
+in/
+*.ipa
+*.dylib
+__pycache__/
+.DS_Store
