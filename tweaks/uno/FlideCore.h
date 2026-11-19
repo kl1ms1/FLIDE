@@ -6,36 +6,52 @@
 #define FLog(fmt, ...) NSLog(@"[FLIDE] " fmt, ##__VA_ARGS__)
 
 // ---------- настройки ----------
-#define kNoAds      @"flide.noads"
-#define kHD         @"flide.hd"
-#define kFPS120     @"flide.fps120"
-#define kFxTouch    @"flide.fx.touch"
-#define kFxCombo    @"flide.fx.combo"
-#define kFxStyle    @"flide.fx.style"
-#define kFxColor    @"flide.fx.color"
-#define kTexts      @"flide.texts"     // path -> string
-#define kAuras      @"flide.auras"     // path -> {style, color}
-#define kTextures   @"flide.textures"  // texture name -> file name
-#define kBoot       @"flide.boot"
-#define kBootSeconds @"flide.boot.seconds"
-#define kSpoof      @"flide.clone.spoof"
-#define kFunSpeed   @"flide.fun.speed"
-#define kFunRainbow @"flide.fun.rainbow"
-#define kFunConfetti @"flide.fun.confetti"
-#define kFunTrail   @"flide.fun.trail"
-#define kFunHaptic  @"flide.fun.haptic"
-#define kFunShake   @"flide.fun.shake"
-#define kFunFPS     @"flide.fun.fps"
+#define kNoAds        @"flide.noads"
+#define kHD           @"flide.hd"
+#define kFPS120       @"flide.fps120"
+#define kFxTouch      @"flide.fx.touch"
+#define kFxCombo      @"flide.fx.combo"
+#define kFxStyle      @"flide.fx.style"
+#define kFxColor      @"flide.fx.color"
+#define kTexts        @"flide.texts"      // path -> string
+#define kAuras        @"flide.auras"      // path -> {style, color}
+#define kTextures     @"flide.textures"   // texture name -> file name
+#define kBoot         @"flide.boot"
+#define kBootSeconds  @"flide.boot.seconds"
+#define kBootAnim     @"flide.boot.anim"  // 0 пружинка, 1 вспышка, 2 глитч, 3 печать
+#define kSpoof        @"flide.clone.spoof"
+#define kFunSpeed     @"flide.fun.speed"
+#define kFunRainbow   @"flide.fun.rainbow"
+#define kFunConfetti  @"flide.fun.confetti"
+#define kFunTrail     @"flide.fun.trail"
+#define kFunHaptic    @"flide.fun.haptic"
+#define kFunShake     @"flide.fun.shake"
+#define kFunFPS       @"flide.fun.fps"
+#define kFunNight     @"flide.fun.night"     // 0…0.45 — тёплый фильтр
+#define kVictoryStyle @"flide.victory.style" // 0 конфетти, 1 фейерверк, 2 всё сразу
+#define kVictoryText  @"flide.victory.text"
+#define kStreamer     @"flide.streamer"
+#define kStreamerPaths @"flide.streamer.paths"
+#define kMyAvatar     @"flide.myavatar"      // путь элемента «мой аватар»
+#define kPackActive   @"flide.pack.active"
+#define kTableAnim    @"flide.tableanim"     // {texture, fps}
+#define kStats        @"flide.stats"
 
 static inline NSUserDefaults *FDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static inline BOOL FBool(NSString *k) { return [FDefaults() boolForKey:k]; }
 
-NSString *FlideDir(NSString *sub);
+NSString *FlideDir(NSString *sub);          // Documents/FLIDE/<sub>, создаётся
+NSString *FlideSafeName(NSString *s);       // имя файла из имени текстуры
 BOOL FlideGuardTripped(NSString *op);       // функция отключена после вылета
 void FlideGuardCheckOnLaunch(void);
-void FlideGuardReset(void);          // Documents/FLIDE/<sub>, создаётся
+void FlideGuardReset(void);
 UIColor  *FlideColorFromHex(NSString *hex);
 NSString *FlideHexFromColor(UIColor *c);
+UIView   *FlideGlass(CGFloat radius);       // стеклянная подложка (Liquid Glass на iOS 26)
+
+// ---------- фильтры картинок (редактор и темы) ----------
+NSArray<NSString *> *FlideFilterNames(void);
+UIImage *FlideFilterImage(UIImage *img, NSInteger filter, float hue, float strength);
 
 // ---------- стили эффектов ----------
 typedef NS_ENUM(NSInteger, FlideFxStyle) {
@@ -64,11 +80,14 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 // текстуры
 - (NSArray<FlideItem *> *)scanTextures;
 - (UIImage *)imageOfTexture:(FlideItem *)item maxSide:(int)maxSide;
+- (UIImage *)imageOfTextureObject:(void *)tex maxSide:(int)maxSide;
 - (BOOL)replaceTexture:(FlideItem *)item withImage:(UIImage *)image;
 - (BOOL)resetTexture:(FlideItem *)item;           // YES — оригинал вернулся сразу
 - (UIImage *)originalOfTexture:(FlideItem *)item;
+- (BOOL)loadPNG:(NSData *)png intoTexture:(void *)tex;
 - (NSURL *)exportTexture:(FlideItem *)item;
 - (NSUInteger)exportAllTextures;
+- (void)reapplyReplacements;                      // заново применить индекс (после смены пака)
 
 // тексты
 - (NSArray<FlideItem *> *)scanTexts;
@@ -88,13 +107,66 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 + (instancetype)editorForItem:(FlideItem *)item onChange:(void (^)(void))onChange;
 @end
 
+// ---------- паки, темы, анимированный стол ----------
+@interface FlidePacks : NSObject
++ (instancetype)shared;
+- (void)start;
+- (NSArray<NSString *> *)packs;                       // папки в FLIDE/packs
+- (NSUInteger)activatePack:(NSString *)name;          // сколько текстур подставлено
+- (void)deactivatePack;
+- (NSURL *)savePresetNamed:(NSString *)name;          // текущие замены + настройки → пак
+- (NSUInteger)importFromURLs:(NSArray<NSURL *> *)urls asPack:(NSString *)name;
+- (NSURL *)zipFolder:(NSString *)path;                // zip для выгрузки (HD-апскейл)
+// темы — фильтр сразу ко всем текстурам
+@property (nonatomic, readonly) BOOL themeRunning;
+- (void)applyTheme:(NSInteger)filter progress:(void (^)(NSUInteger done, NSUInteger total))progress;
+- (void)cancelTheme;
+// анимированная текстура (стол)
+- (BOOL)setAnimationForTexture:(NSString *)textureName frames:(NSArray<UIImage *> *)frames fps:(double)fps size:(CGSize)size;
+- (void)stopAnimation;
+- (NSString *)animatedTexture;
+@end
+
 // ---------- приколы ----------
 @interface FlideFun : NSObject
 + (instancetype)shared;
 - (void)start;
 - (void)applySpeed;
+- (void)applyNight;
 - (void)confettiNow;
+- (void)fireworksNow;
+- (void)victoryNow;
 - (void)shakeScreen;
+- (void)countThrow:(NSUInteger)combo;
+- (NSDictionary *)stats;
+- (void)resetStats;
+@end
+
+// ---------- эмоции и подарки (только у тебя на экране) ----------
+@interface FlideEmotes : NSObject
++ (instancetype)shared;
+- (NSArray<NSString *> *)builtinEmotes;               // эмодзи
+- (NSArray<NSString *> *)customEmotes;                // пути PNG
+- (BOOL)addCustomEmote:(UIImage *)img;
+- (void)removeCustomEmote:(NSString *)path;
+- (void)sendEmote:(id)emote;                          // NSString эмодзи или путь PNG
+- (NSArray<NSDictionary *> *)builtinGifts;            // {id, title, icon}
+- (NSArray<NSString *> *)customGifts;
+- (BOOL)addCustomGift:(UIImage *)img;
+- (void)removeCustomGift:(NSString *)path;
+- (void)sendGift:(id)gift toPoint:(NSValue *)target;  // nil — себе
+@end
+
+// ---------- инструменты ----------
+@interface FlideTools : NSObject
++ (instancetype)shared;
+- (void)toggleDrawingIn:(UIView *)host;
+- (void)addSticker:(UIImage *)img in:(UIView *)host;
+- (void)clearStickers;
+- (UIImage *)cleanScreenshot;                         // кадр игры без окон FLIDE
+- (void)setClipBuffering:(BOOL)on completion:(void (^)(NSError *err))done;
+- (BOOL)clipBuffering;
+- (void)exportClip:(void (^)(NSURL *url, NSError *err))done;
 @end
 
 // ---------- эффекты ----------
@@ -105,7 +177,7 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (void)burstAt:(CGPoint)p big:(BOOL)big;
 - (void)cardThrownAt:(CGPoint)p;
 - (void)highlightAt:(CGPoint)p;          // подсветить элемент игры
-- (UIView *)overlayView;                 // слой поверх игры (для FPS и конфетти)
+- (UIView *)overlayView;                 // слой поверх игры (касания проходят насквозь)
 @end
 
 // ---------- режим клона ----------
@@ -119,6 +191,7 @@ BOOL FlideIsClone(void);
 + (void)showAnimated;
 + (BOOL)setCustomImage:(UIImage *)img;   // nil — вернуть стандартное
 + (BOOL)hasCustomImage;
++ (NSArray<NSString *> *)animationNames;
 @end
 
 // ---------- меню ----------
@@ -126,4 +199,5 @@ BOOL FlideIsClone(void);
 + (void)install;
 + (void)show;                // панель запуска
 + (BOOL)isOverlayWindow:(UIWindow *)w;
++ (UIView *)overlayRoot;     // интерактивный слой окон FLIDE
 @end

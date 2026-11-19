@@ -102,14 +102,9 @@ NSString *FlideBootLogoPath(void) {
     logo.center = CGPointMake(CGRectGetMidX(root.bounds), CGRectGetMidY(root.bounds));
     logo.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
                             UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
-    logo.alpha = 0;
-    logo.transform = CGAffineTransformMakeScale(0.6, 0.6);
     [root addSubview:logo];
-
-    [UIView animateWithDuration:0.7 delay:0.1 usingSpringWithDamping:0.6 initialSpringVelocity:0.8 options:0 animations:^{
-        logo.alpha = 1;
-        logo.transform = CGAffineTransformIdentity;
-    } completion:^(BOOL f) {
+    NSInteger anim = [FDefaults() integerForKey:kBootAnim];
+    void (^ring)(void) = ^{
         // волна акцентного цвета от логотипа
         CAShapeLayer *ring = [CAShapeLayer layer];
         ring.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(-40, -40, 80, 80)].CGPath;
@@ -123,7 +118,55 @@ NSString *FlideBootLogoPath(void) {
         CAAnimationGroup *g = [CAAnimationGroup animation];
         g.animations = @[sc, op]; g.duration = 1.0; g.fillMode = kCAFillModeForwards; g.removedOnCompletion = NO;
         [ring addAnimation:g forKey:nil];
-    }];
+    };
+
+    if (anim == 1) { // вспышка
+        UIView *flash = [[UIView alloc] initWithFrame:root.bounds];
+        flash.backgroundColor = UIColor.whiteColor;
+        flash.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [root addSubview:flash];
+        logo.transform = CGAffineTransformMakeScale(1.4, 1.4);
+        [UIView animateWithDuration:0.6 delay:0.05 options:UIViewAnimationOptionCurveEaseOut animations:^{
+            flash.alpha = 0;
+            logo.transform = CGAffineTransformIdentity;
+        } completion:^(BOOL f) { [flash removeFromSuperview]; ring(); }];
+    } else if (anim == 2) { // глитч: дрожание и цветные сдвиги
+        logo.alpha = 1;
+        UIColor *accent = FlideColorFromHex([FDefaults() stringForKey:kFxColor]);
+        for (int i = 0; i < 9; i++) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.07 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                BOOL last = i == 8;
+                logo.transform = last ? CGAffineTransformIdentity
+                                      : CGAffineTransformMakeTranslation((drand48() - 0.5) * 30, (drand48() - 0.5) * 10);
+                logo.alpha = last ? 1 : 0.5 + drand48() * 0.5;
+                logo.layer.shadowColor = (i % 2 ? accent : UIColor.systemRedColor).CGColor;
+                logo.layer.shadowOffset = last ? CGSizeZero : CGSizeMake((drand48() - 0.5) * 16, 0);
+                logo.layer.shadowOpacity = 1; logo.layer.shadowRadius = last ? 24 : 0;
+                if (last) ring();
+            });
+        }
+    } else if (anim == 3 && !custom) { // печатная машинка
+        logo.alpha = 1;
+        UILabel *title = nil;
+        for (UIView *v in [logo.subviews.firstObject isKindOfClass:UIVisualEffectView.class]
+                 ? ((UIVisualEffectView *)logo.subviews.firstObject).contentView.subviews : @[])
+            if ([v isKindOfClass:UILabel.class]) { title = (UILabel *)v; break; }
+        NSString *full = title.text ?: @"";
+        title.text = @"";
+        for (NSUInteger i = 1; i <= full.length; i++) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((0.1 + i * 0.09) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                title.text = [full substringToIndex:i];
+                if (i == full.length) ring();
+            });
+        }
+    } else { // пружинка
+        logo.alpha = 0;
+        logo.transform = CGAffineTransformMakeScale(0.6, 0.6);
+        [UIView animateWithDuration:0.7 delay:0.1 usingSpringWithDamping:0.6 initialSpringVelocity:0.8 options:0 animations:^{
+            logo.alpha = 1;
+            logo.transform = CGAffineTransformIdentity;
+        } completion:^(BOOL f) { ring(); }];
+    }
 
     double hold = [FDefaults() doubleForKey:kBootSeconds] ?: 2.2;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(hold * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -160,6 +203,8 @@ NSString *FlideBootLogoPath(void) {
     }];
     return [png writeToFile:FlideBootLogoPath() atomically:YES];
 }
+
++ (NSArray<NSString *> *)animationNames { return @[@"Пружинка", @"Вспышка", @"Глитч", @"Печатная машинка"]; }
 
 + (BOOL)hasCustomImage {
     return [NSFileManager.defaultManager fileExistsAtPath:FlideBootLogoPath()];

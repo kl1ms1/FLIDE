@@ -9,7 +9,7 @@ NSString *FlideDir(NSString *sub) {
     return dir;
 }
 
-static NSString *safeFileName(NSString *s) {
+NSString *FlideSafeName(NSString *s) {
     NSCharacterSet *bad = [NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>| "];
     NSString *r = [[s componentsSeparatedByCharactersInSet:bad] componentsJoinedByString:@"_"];
     return r.length ? r : @"noname";
@@ -190,7 +190,7 @@ static void guardEnd(void) { [FDefaults() removeObjectForKey:kGuard]; }
 }
 
 - (NSString *)originalPath:(FlideItem *)item {
-    return [FlideDir(@"originals") stringByAppendingPathComponent:[safeFileName(item.name) stringByAppendingPathExtension:@"png"]];
+    return [FlideDir(@"originals") stringByAppendingPathComponent:[FlideSafeName(item.name) stringByAppendingPathExtension:@"png"]];
 }
 
 - (UIImage *)originalOfTexture:(FlideItem *)item {
@@ -233,7 +233,7 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     NSData *png = pngFitted(image, w, h); // размер как у оригинала — спрайты в атласе не съедут
     if (![self loadPNG:png intoTexture:tex]) return NO;
 
-    NSString *file = [safeFileName(item.name) stringByAppendingPathExtension:@"png"];
+    NSString *file = [FlideSafeName(item.name) stringByAppendingPathExtension:@"png"];
     [png writeToFile:[FlideDir(@"textures") stringByAppendingPathComponent:file] atomically:YES];
     NSMutableDictionary *idx = [[FDefaults() dictionaryForKey:kTextures] mutableCopy] ?: [NSMutableDictionary new];
     idx[item.name] = file;
@@ -259,7 +259,7 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     UIImage *img = [self imageOfTexture:item maxSide:4096];
     if (!img) return nil;
     NSString *path = [FlideDir(@"export") stringByAppendingPathComponent:
-                      [safeFileName(item.name) stringByAppendingPathExtension:@"png"]];
+                      [FlideSafeName(item.name) stringByAppendingPathExtension:@"png"]];
     return [UIImagePNGRepresentation(img) writeToFile:path atomically:YES] ? [NSURL fileURLWithPath:path] : nil;
 }
 
@@ -267,6 +267,11 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     NSUInteger n = 0;
     for (FlideItem *it in [self scanTextures]) @autoreleasepool { if ([self exportTexture:it]) n++; }
     return n;
+}
+
+- (void)reapplyReplacements {
+    [self.replacedIDs removeAllObjects];
+    [self slowTick];
 }
 
 #pragma mark - качество
@@ -299,7 +304,8 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
         NSNumber *iid = @(FIL_InstanceID(tex));
         if (hd && ![self.hdIDs containsObject:iid]) { [self hdTexture:tex]; [self.hdIDs addObject:iid]; }
         if (idx.count && ![self.replacedIDs containsObject:iid]) {
-            NSString *file = idx[FIL_Name(tex)];
+            NSString *tn = FIL_Name(tex);
+            NSString *file = idx[tn] ?: idx[FlideSafeName(tn)]; // паки хранят «безопасные» имена
             if (file) {
                 NSData *png = [NSData dataWithContentsOfFile:[FlideDir(@"textures") stringByAppendingPathComponent:file]];
                 UIImage *img = png ? [UIImage imageWithData:png] : nil;
@@ -366,19 +372,25 @@ static NSArray<NSValue *> *allTextObjects(void) {
 }
 
 - (void)textTick {
-    NSDictionary *rules = [FDefaults() dictionaryForKey:kTexts];
+    NSMutableDictionary *rules = [[FDefaults() dictionaryForKey:kTexts] mutableCopy] ?: [NSMutableDictionary new];
+    // режим стримера: выбранные ники → «Игрок N»
+    NSArray *streamer = FBool(kStreamer) ? [FDefaults() arrayForKey:kStreamerPaths] : nil;
+    for (NSString *p in streamer) if (!rules[p]) rules[p] = @"⟪FLIDE-STREAMER⟫"; // маркер
     if (!rules.count || !FIL_Ready()) return;
     CFTimeInterval now = CACurrentMediaTime();
     if (now - self.lastTextScan > 2.5) {
         self.lastTextScan = now;
         [self refreshTargets:self.textTargets forPaths:rules.allKeys objects:allTextObjects()];
     }
+    __block int player = 1;
     [rules enumerateKeysAndObjectsUsingBlock:^(NSString *path, NSString *text, BOOL *stop) {
+        BOOL masked = [text isEqualToString:@"⟪FLIDE-STREAMER⟫"];
         for (NSNumber *h in self.textTargets[path]) {
             void *o = FIL_Target(h.unsignedIntValue);
             if (!o) continue;
+            NSString *want = masked ? [NSString stringWithFormat:@"Игрок %d", player++] : text;
             NSString *cur = FIL_ToNSString(FIL_Call0(o, "get_text"));
-            if (cur && ![cur isEqualToString:text]) FIL_Call1(o, "set_text", FIL_NewString(text));
+            if (cur && ![cur isEqualToString:want]) FIL_Call1(o, "set_text", FIL_NewString(want));
         }
     }];
 }
@@ -416,8 +428,11 @@ static NSArray<NSValue *> *allTextObjects(void) {
         CFTimeInterval now = CACurrentMediaTime();
         if (now - self.lastElementScan < 5.0) break;
         self.lastElementScan = now;
-        NSArray *paths = [[FDefaults() dictionaryForKey:kAuras] allKeys] ?: @[];
-        [self refreshTargets:self.elementTargets forPaths:paths objects:FIL_FindAll("UnityEngine.UI", "Graphic")];
+        NSMutableSet *paths = [NSMutableSet setWithArray:[[FDefaults() dictionaryForKey:kAuras] allKeys] ?: @[]];
+        [paths addObject:path];
+        NSString *me = [FDefaults() stringForKey:kMyAvatar];
+        if (me) [paths addObject:me];
+        [self refreshTargets:self.elementTargets forPaths:paths.allObjects objects:FIL_FindAll("UnityEngine.UI", "Graphic")];
     }
     return NO;
 }

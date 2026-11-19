@@ -3,7 +3,6 @@
 #import "FlideCore.h"
 #import <objc/runtime.h>
 
-BOOL gFlideMenuVisible = NO;
 
 UIColor *FlideColorFromHex(NSString *hex) {
     unsigned v = 0x7CF7FF;
@@ -159,6 +158,7 @@ static CALayer *makeEffect(FlideFxStyle style, UIColor *color, CGFloat radius) {
 @end
 
 @interface FlideFX ()
+- (void)trailAt:(CGPoint)p;
 @property (nonatomic, strong) UIWindow *window;
 @property (nonatomic, strong) CADisplayLink *link;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, CALayer *> *auras;
@@ -168,12 +168,21 @@ static CALayer *makeEffect(FlideFxStyle style, UIColor *color, CGFloat radius) {
 static IMP gOrigSendEvent;
 static NSMutableDictionary<NSValue *, NSValue *> *gTouchStart;
 
+static CFTimeInterval gLastTrail;
+
 static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
     ((void (*)(id, SEL, UIEvent *))gOrigSendEvent)(self, _cmd, event);
-    if (event.type != UIEventTypeTouches || gFlideMenuVisible || !FBool(kFxTouch)) return;
+    if (event.type != UIEventTypeTouches || [FlideMenu isOverlayWindow:self]) return;
+    BOOL sparks = FBool(kFxTouch), trail = FBool(kFunTrail);
+    if (!sparks && !trail) return;
     for (UITouch *t in event.allTouches) {
         NSValue *key = [NSValue valueWithNonretainedObject:t];
         CGPoint p = [t locationInView:nil];
+        if (t.phase == UITouchPhaseMoved && trail) {
+            CFTimeInterval now = CACurrentMediaTime();
+            if (now - gLastTrail > 0.016) { gLastTrail = now; [[FlideFX shared] trailAt:p]; }
+        }
+        if (!sparks) continue;
         if (t.phase == UITouchPhaseBegan) gTouchStart[key] = [NSValue valueWithCGPoint:p];
         else if (t.phase == UITouchPhaseEnded || t.phase == UITouchPhaseCancelled) {
             NSValue *s = gTouchStart[key];
@@ -222,6 +231,49 @@ static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
 }
 
 - (CALayer *)canvas { return self.window.rootViewController.view.layer; }
+- (UIView *)overlayView { return self.window.rootViewController.view; }
+
+- (void)trailAt:(CGPoint)p {
+    if (!self.window) return;
+    UIColor *color = FlideColorFromHex([FDefaults() stringForKey:kFxColor]);
+    CALayer *dot = [CALayer layer];
+    dot.bounds = CGRectMake(0, 0, 14, 14);
+    dot.cornerRadius = 7;
+    dot.position = p;
+    dot.backgroundColor = color.CGColor;
+    dot.shadowColor = color.CGColor; dot.shadowOpacity = 1; dot.shadowRadius = 8; dot.shadowOffset = CGSizeZero;
+    [self.canvas addSublayer:dot];
+    CABasicAnimation *sc = [CABasicAnimation animationWithKeyPath:@"transform.scale"]; sc.toValue = @0.1;
+    CABasicAnimation *op = [CABasicAnimation animationWithKeyPath:@"opacity"]; op.toValue = @0;
+    CAAnimationGroup *g = [CAAnimationGroup animation];
+    g.animations = @[sc, op]; g.duration = 0.45; g.fillMode = kCAFillModeForwards; g.removedOnCompletion = NO;
+    [dot addAnimation:g forKey:nil];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [dot removeFromSuperlayer]; });
+}
+
+- (void)highlightAt:(CGPoint)p {
+    if (!self.window) return;
+    UIColor *color = FlideColorFromHex([FDefaults() stringForKey:kFxColor]);
+    for (int i = 0; i < 3; i++) {
+        CAShapeLayer *ring = [CAShapeLayer layer];
+        ring.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(-30, -30, 60, 60)].CGPath;
+        ring.position = p;
+        ring.fillColor = [color colorWithAlphaComponent:0.15].CGColor;
+        ring.strokeColor = color.CGColor;
+        ring.lineWidth = 3;
+        ring.opacity = 0;
+        [self.canvas addSublayer:ring];
+        CABasicAnimation *sc = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+        sc.fromValue = @0.4; sc.toValue = @2.2;
+        CAKeyframeAnimation *op = [CAKeyframeAnimation animationWithKeyPath:@"opacity"];
+        op.values = @[@0, @1, @0];
+        CAAnimationGroup *g = [CAAnimationGroup animation];
+        g.animations = @[sc, op]; g.duration = 0.8; g.beginTime = CACurrentMediaTime() + i * 0.35;
+        g.fillMode = kCAFillModeBoth; g.removedOnCompletion = NO;
+        [ring addAnimation:g forKey:nil];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [ring removeFromSuperlayer]; });
+    }
+}
 
 - (void)reloadRules {
     for (CALayer *l in self.auras.allValues) [l removeFromSuperlayer];
@@ -237,7 +289,6 @@ static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
 
 - (void)tick {
     if (!self.auras.count) return;
-    self.window.hidden = gFlideMenuVisible;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [self.auras enumerateKeysAndObjectsUsingBlock:^(NSString *path, CALayer *l, BOOL *stop) {
@@ -259,6 +310,12 @@ static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
     BOOL big = FBool(kFxCombo) && combo >= 3;
     [self burstAt:p big:big];
     if (big) [self showCombo:combo at:p];
+    if (FBool(kFunHaptic)) {
+        UIImpactFeedbackGenerator *h = [[UIImpactFeedbackGenerator alloc] initWithStyle:big ? UIImpactFeedbackStyleHeavy : UIImpactFeedbackStyleLight];
+        [h impactOccurred];
+    }
+    if (big && FBool(kFunShake)) [[FlideFun shared] shakeScreen];
+    [[FlideFun shared] countThrow:combo];
 }
 
 - (void)burstAt:(CGPoint)p big:(BOOL)big {

@@ -1,0 +1,61 @@
+name: HD texture pack
+
+# 1. В меню FLIDE: «📦 Паки и темы → Экспортировать все текстуры в zip»
+# 2. Загрузи zip в Release с тегом hd-src
+# 3. Запусти этот workflow → скачай артефакт FLIDE-HD-pack
+# 4. Распакуй в «Файлах» и импортируй как пак в FLIDE
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег релиза с export.zip"
+        required: true
+        default: hd-src
+      model:
+        description: "Модель Real-ESRGAN"
+        required: true
+        default: realesr-animevideov3
+        type: choice
+        options: [realesr-animevideov3, realesrgan-x4plus-anime, realesrgan-x4plus]
+
+permissions:
+  contents: read
+
+jobs:
+  upscale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download export zip
+        run: |
+          set -euo pipefail
+          gh release download "${{ inputs.release_tag }}" --repo "$GITHUB_REPOSITORY" --pattern "*.zip" --dir in
+          mkdir -p src && for z in in/*.zip; do unzip -o -q "$z" -d src; done
+          find src -iname '*.png' | wc -l
+
+      - name: Install Real-ESRGAN (ncnn + программный Vulkan)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 libgomp1
+          curl -sSL -o esr.zip https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip
+          mkdir -p esr && unzip -q esr.zip -d esr
+          chmod +x esr/realesrgan-ncnn-vulkan
+          python3 -m pip install --quiet pillow
+
+      - name: Upscale
+        run: |
+          set -euo pipefail
+          python3 tools/hd_pack.py src out esr "${{ inputs.model }}"
+
+      - name: Upload pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLIDE-HD-pack
+          path: out
+          retention-days: 14

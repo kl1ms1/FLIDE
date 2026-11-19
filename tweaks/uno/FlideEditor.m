@@ -4,12 +4,71 @@
 #import "FlideCore.h"
 #import <PhotosUI/PhotosUI.h>
 #import <CoreImage/CoreImage.h>
+#import <ImageIO/ImageIO.h>
 
 typedef NS_ENUM(NSInteger, FFit) { FFitFill, FFitFit, FFitStretch };
 
-static NSArray<NSString *> *filterNames(void) {
+NSArray<NSString *> *FlideFilterNames(void) {
     return @[@"Без фильтра", @"Неон", @"Ч/Б", @"Инверсия", @"Тёплый", @"Холодный",
-             @"Пиксели", @"Комикс", @"Постер", @"Сочный", @"Винтаж", @"Тьма"];
+             @"Пиксели", @"Комикс", @"Постер", @"Сочный", @"Винтаж", @"Тьма",
+             @"Пастель", @"Протанопия", @"Дейтеранопия", @"Тританопия"];
+}
+
+static CIContext *ciContext(void) {
+    static CIContext *c;
+    if (!c) c = [CIContext contextWithOptions:@{ kCIContextUseSoftwareRenderer: @NO }];
+    return c;
+}
+
+// матрица цвета (строки R, G, B)
+static CIImage *colorMatrix(CIImage *img, CGFloat m[9]) {
+    return [img imageByApplyingFilter:@"CIColorMatrix" withInputParameters:@{
+        @"inputRVector": [CIVector vectorWithX:m[0] Y:m[1] Z:m[2] W:0],
+        @"inputGVector": [CIVector vectorWithX:m[3] Y:m[4] Z:m[5] W:0],
+        @"inputBVector": [CIVector vectorWithX:m[6] Y:m[7] Z:m[8] W:0],
+        @"inputAVector": [CIVector vectorWithX:0 Y:0 Z:0 W:1]}];
+}
+
+UIImage *FlideFilterImage(UIImage *src, NSInteger filter, float hue, float strength) {
+    if (!src.CGImage) return src;
+    CIImage *base = [CIImage imageWithCGImage:src.CGImage];
+    CIImage *img = base;
+    CGFloat scale = MAX(base.extent.size.width, base.extent.size.height) / 1024.0;
+    switch (filter) {
+        case 1:
+            img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputSaturation": @2.2, @"inputContrast": @1.35, @"inputBrightness": @0.05}];
+            img = [img imageByApplyingFilter:@"CIBloom" withInputParameters:@{@"inputRadius": @(6 * scale + 2), @"inputIntensity": @1.0}];
+            break;
+        case 2: img = [img imageByApplyingFilter:@"CIPhotoEffectNoir" withInputParameters:@{}]; break;
+        case 3: img = [img imageByApplyingFilter:@"CIColorInvert" withInputParameters:@{}]; break;
+        case 4: img = [img imageByApplyingFilter:@"CITemperatureAndTint" withInputParameters:@{@"inputNeutral": [CIVector vectorWithX:6500 Y:0], @"inputTargetNeutral": [CIVector vectorWithX:4200 Y:0]}]; break;
+        case 5: img = [img imageByApplyingFilter:@"CITemperatureAndTint" withInputParameters:@{@"inputNeutral": [CIVector vectorWithX:6500 Y:0], @"inputTargetNeutral": [CIVector vectorWithX:11000 Y:0]}]; break;
+        case 6: img = [img imageByApplyingFilter:@"CIPixellate" withInputParameters:@{@"inputScale": @(MAX(2, 10 * scale)), @"inputCenter": [CIVector vectorWithX:0 Y:0]}]; break;
+        case 7: img = [img imageByApplyingFilter:@"CIComicEffect" withInputParameters:@{}]; break;
+        case 8: img = [img imageByApplyingFilter:@"CIColorPosterize" withInputParameters:@{@"inputLevels": @5}]; break;
+        case 9: img = [img imageByApplyingFilter:@"CIVibrance" withInputParameters:@{@"inputAmount": @1.0}];
+                img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputSaturation": @1.5, @"inputContrast": @1.15}]; break;
+        case 10: img = [img imageByApplyingFilter:@"CIPhotoEffectTransfer" withInputParameters:@{}]; break;
+        case 11: img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputBrightness": @-0.25, @"inputContrast": @1.4, @"inputSaturation": @0.7}]; break;
+        case 12: img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputBrightness": @0.12, @"inputContrast": @0.85, @"inputSaturation": @0.6}]; break;
+        // коррекция для дальтоников (daltonize: переносим неразличимые оттенки в различимые)
+        case 13: { CGFloat m[9] = {1,0,0, 0.7,1,0, 0.7,0,1}; img = colorMatrix(img, m); break; }
+        case 14: { CGFloat m[9] = {1,0.7,0, 0,1,0, 0,0.7,1}; img = colorMatrix(img, m); break; }
+        case 15: { CGFloat m[9] = {1,0,0.7, 0,1,0.7, 0,0,1}; img = colorMatrix(img, m); break; }
+        default: break;
+    }
+    if (fabsf(hue) > 0.01)
+        img = [img imageByApplyingFilter:@"CIHueAdjust" withInputParameters:@{@"inputAngle": @(hue)}];
+    img = [img imageByCroppingToRect:base.extent];
+    if (strength < 0.99) {
+        CIImage *mask = [[CIImage imageWithColor:[CIColor colorWithRed:strength green:strength blue:strength]] imageByCroppingToRect:base.extent];
+        img = [img imageByApplyingFilter:@"CIBlendWithMask" withInputParameters:@{@"inputBackgroundImage": base, @"inputMaskImage": mask}];
+    }
+    img = [img imageByApplyingFilter:@"CISourceInCompositing" withInputParameters:@{@"inputBackgroundImage": base}];
+    CGImageRef cg = [ciContext() createCGImage:img fromRect:base.extent];
+    UIImage *out = cg ? [UIImage imageWithCGImage:cg] : src;
+    if (cg) CGImageRelease(cg);
+    return out;
 }
 
 @interface FlideTextureEditor () <PHPickerViewControllerDelegate>
@@ -23,16 +82,11 @@ static NSArray<NSString *> *filterNames(void) {
 @property (nonatomic, strong) UIStackView *buttons;
 @property (nonatomic, strong) UIView *panel;
 @property (nonatomic, assign) NSInteger filter;
+@property (nonatomic, assign) BOOL pickingFrames;
 @property (nonatomic, copy) void (^onChange)(void);
 @end
 
 @implementation FlideTextureEditor
-
-static CIContext *ciContext(void) {
-    static CIContext *c;
-    if (!c) c = [CIContext contextWithOptions:@{ kCIContextUseSoftwareRenderer: @NO }];
-    return c;
-}
 
 + (instancetype)editorForItem:(FlideItem *)item onChange:(void (^)(void))onChange {
     FlideTextureEditor *e = [FlideTextureEditor new];
@@ -129,7 +183,7 @@ static CIContext *ciContext(void) {
     self.chips.showsHorizontalScrollIndicator = NO;
     [c addSubview:self.chips];
     CGFloat x0 = 0;
-    NSArray *names = filterNames();
+    NSArray *names = FlideFilterNames();
     for (NSInteger i = 0; i < (NSInteger)names.count; i++) {
         UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
         [b setTitle:names[i] forState:UIControlStateNormal];
@@ -163,6 +217,7 @@ static CIContext *ciContext(void) {
         [self button:@"🖼 Фото" action:@selector(pickPhoto) tint:nil],
         [self button:@"↺ Оригинал" action:@selector(restore) tint:nil],
         [self button:@"⬇︎ PNG" action:@selector(savePNG) tint:nil],
+        [self button:@"🎞 Анимация" action:@selector(pickAnimation) tint:nil],
         [self button:@"✦ Применить" action:@selector(apply) tint:self.hue.tintColor],
     ]];
     self.buttons.distribution = UIStackViewDistributionFillEqually;
@@ -248,45 +303,7 @@ static CIContext *ciContext(void) {
         [self.source drawInRect:r];
     }];
 
-    CIImage *base = [CIImage imageWithCGImage:fitted.CGImage];
-    CIImage *img = base;
-    CGFloat strength = self.strength.value;
-
-    switch (self.filter) {
-        case 1: // неон
-            img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputSaturation": @2.2, @"inputContrast": @1.35, @"inputBrightness": @0.05}];
-            img = [img imageByApplyingFilter:@"CIBloom" withInputParameters:@{@"inputRadius": @(6 * scale + 2), @"inputIntensity": @1.0}];
-            break;
-        case 2: img = [img imageByApplyingFilter:@"CIPhotoEffectNoir" withInputParameters:@{}]; break;
-        case 3: img = [img imageByApplyingFilter:@"CIColorInvert" withInputParameters:@{}]; break;
-        case 4: img = [img imageByApplyingFilter:@"CITemperatureAndTint" withInputParameters:@{@"inputNeutral": [CIVector vectorWithX:6500 Y:0], @"inputTargetNeutral": [CIVector vectorWithX:4200 Y:0]}]; break;
-        case 5: img = [img imageByApplyingFilter:@"CITemperatureAndTint" withInputParameters:@{@"inputNeutral": [CIVector vectorWithX:6500 Y:0], @"inputTargetNeutral": [CIVector vectorWithX:11000 Y:0]}]; break;
-        case 6: img = [img imageByApplyingFilter:@"CIPixellate" withInputParameters:@{@"inputScale": @(MAX(2, 10 * scale)), @"inputCenter": [CIVector vectorWithX:0 Y:0]}]; break;
-        case 7: img = [img imageByApplyingFilter:@"CIComicEffect" withInputParameters:@{}]; break;
-        case 8: img = [img imageByApplyingFilter:@"CIColorPosterize" withInputParameters:@{@"inputLevels": @5}]; break;
-        case 9: img = [img imageByApplyingFilter:@"CIVibrance" withInputParameters:@{@"inputAmount": @1.0}];
-                img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputSaturation": @1.5, @"inputContrast": @1.15}]; break;
-        case 10: img = [img imageByApplyingFilter:@"CIPhotoEffectTransfer" withInputParameters:@{}];
-                 img = [img imageByApplyingFilter:@"CIVignette" withInputParameters:@{@"inputIntensity": @1.0, @"inputRadius": @(2 * MAX(T.width, T.height) / 1000.0 + 1)}]; break;
-        case 11: img = [img imageByApplyingFilter:@"CIColorControls" withInputParameters:@{@"inputBrightness": @-0.25, @"inputContrast": @1.4, @"inputSaturation": @0.7}]; break;
-        default: break;
-    }
-    if (fabsf(self.hue.value) > 0.01)
-        img = [img imageByApplyingFilter:@"CIHueAdjust" withInputParameters:@{@"inputAngle": @(self.hue.value)}];
-    img = [img imageByCroppingToRect:base.extent];
-
-    // сила эффекта: смешиваем с исходником
-    if (strength < 0.99) {
-        CIImage *mask = [[CIImage imageWithColor:[CIColor colorWithRed:strength green:strength blue:strength]] imageByCroppingToRect:base.extent];
-        img = [img imageByApplyingFilter:@"CIBlendWithMask" withInputParameters:@{@"inputBackgroundImage": base, @"inputMaskImage": mask}];
-    }
-    // прозрачность как у исходной картинки
-    img = [img imageByApplyingFilter:@"CISourceInCompositing" withInputParameters:@{@"inputBackgroundImage": base}];
-
-    CGImageRef cg = [ciContext() createCGImage:img fromRect:base.extent];
-    UIImage *out = cg ? [UIImage imageWithCGImage:cg] : fitted;
-    if (cg) CGImageRelease(cg);
-    return out;
+    return FlideFilterImage(fitted, self.filter, self.hue.value, self.strength.value);
 }
 
 - (void)render {
@@ -304,7 +321,73 @@ static CIContext *ciContext(void) {
 
 #pragma mark - действия
 
+- (void)pickAnimation {
+    self.pickingFrames = YES;
+    PHPickerConfiguration *cfg = [PHPickerConfiguration new];
+    cfg.filter = [PHPickerFilter imagesFilter];
+    cfg.selectionLimit = 30;
+    cfg.selection = PHPickerConfigurationSelectionOrdered;
+    PHPickerViewController *p = [[PHPickerViewController alloc] initWithConfiguration:cfg];
+    p.delegate = self;
+    [self presentViewController:p animated:YES completion:nil];
+}
+
+// GIF → кадры
+static NSArray<UIImage *> *framesFromGIF(NSData *data, double *fps) {
+    CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    if (!src) return @[];
+    size_t n = CGImageSourceGetCount(src);
+    NSMutableArray *out = [NSMutableArray new];
+    double total = 0;
+    size_t step = MAX((size_t)1, n / 30); // не больше 30 кадров
+    for (size_t i = 0; i < n; i += step) {
+        CGImageRef cg = CGImageSourceCreateImageAtIndex(src, i, NULL);
+        if (cg) { [out addObject:[UIImage imageWithCGImage:cg]]; CGImageRelease(cg); }
+        NSDictionary *props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(src, i, NULL));
+        NSNumber *d = props[(NSString *)kCGImagePropertyGIFDictionary][(NSString *)kCGImagePropertyGIFDelayTime];
+        total += (d.doubleValue > 0 ? d.doubleValue : 0.1) * step;
+    }
+    CFRelease(src);
+    if (fps && out.count) *fps = MIN(12, MAX(2, out.count / MAX(total, 0.1)));
+    return out;
+}
+
+- (void)loadFrames:(NSArray<PHPickerResult *> *)results {
+    NSMutableArray *frames = [NSMutableArray new];
+    __block double fps = 8;
+    dispatch_group_t g = dispatch_group_create();
+    NSMutableDictionary *byIndex = [NSMutableDictionary new];
+    for (NSUInteger i = 0; i < results.count; i++) {
+        NSItemProvider *p = results[i].itemProvider;
+        dispatch_group_enter(g);
+        if (results.count == 1 && [p hasItemConformingToTypeIdentifier:@"com.compuserve.gif"]) {
+            [p loadDataRepresentationForTypeIdentifier:@"com.compuserve.gif" completionHandler:^(NSData *data, NSError *e) {
+                double f = 8;
+                NSArray *fr = data ? framesFromGIF(data, &f) : @[];
+                @synchronized (byIndex) { for (NSUInteger k = 0; k < fr.count; k++) byIndex[@(k)] = fr[k]; fps = f; }
+                dispatch_group_leave(g);
+            }];
+        } else {
+            [p loadObjectOfClass:UIImage.class completionHandler:^(id<NSItemProviderReading> obj, NSError *e) {
+                if ([obj isKindOfClass:UIImage.class]) @synchronized (byIndex) { byIndex[@(i)] = obj; }
+                dispatch_group_leave(g);
+            }];
+        }
+    }
+    dispatch_group_notify(g, dispatch_get_main_queue(), ^{
+        for (NSNumber *k in [byIndex.allKeys sortedArrayUsingSelector:@selector(compare:)]) [frames addObject:byIndex[k]];
+        if (frames.count < 2) { [self toast:@"Нужно минимум 2 кадра или GIF"]; return; }
+        NSMutableArray *styled = [NSMutableArray new];
+        UIImage *keep = self.source;
+        for (UIImage *f in frames) @autoreleasepool { self.source = f; [styled addObject:[self composeAtScale:1.0] ?: f]; }
+        self.source = keep;
+        BOOL ok = [[FlidePacks shared] setAnimationForTexture:self.item.name frames:styled fps:fps size:self.texSize];
+        [self toast:ok ? [NSString stringWithFormat:@"Анимация: %lu кадров ✦", (unsigned long)styled.count] : @"Не получилось"];
+    });
+}
+
 - (void)pickPhoto {
+    self.pickingFrames = NO;
     PHPickerConfiguration *cfg = [PHPickerConfiguration new];
     cfg.filter = [PHPickerFilter imagesFilter];
     cfg.selectionLimit = 1;
@@ -315,6 +398,7 @@ static CIContext *ciContext(void) {
 
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
     [picker dismissViewControllerAnimated:YES completion:nil];
+    if (self.pickingFrames) { self.pickingFrames = NO; if (results.count) [self loadFrames:results]; return; }
     NSItemProvider *p = results.firstObject.itemProvider;
     if (![p canLoadObjectOfClass:UIImage.class]) return;
     [p loadObjectOfClass:UIImage.class completionHandler:^(id<NSItemProviderReading> obj, NSError *err) {
