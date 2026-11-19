@@ -1,5 +1,6 @@
 // FLIDE · приколы: ускорение, радужные тексты, анимация победы, ночной фильтр, FPS, статистика.
 #import "FlideCore.h"
+#import <CoreMotion/CoreMotion.h>
 
 @interface FlideFun ()
 @property (nonatomic, strong) UILabel *fpsLabel;
@@ -12,6 +13,10 @@
 @property (nonatomic, assign) CFTimeInterval lastRainbowScan;
 @property (nonatomic, assign) BOOL wasVictory, rainbowWasOn;
 @property (nonatomic, assign) float lastSpeed;
+@property (nonatomic, strong) UILabel *clockLabel;
+@property (nonatomic, strong) CMMotionManager *motion;
+@property (nonatomic, assign) CFTimeInterval lastShake;
+@property (nonatomic, assign) NSUInteger partyTicks;
 @end
 
 @implementation FlideFun
@@ -27,27 +32,35 @@
     self.rainbowOrig = [NSMutableDictionary new];
     self.lastSpeed = 1;
     [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) { [self secondTick]; }];
-    [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *t) { [self rainbowTick]; }];
-    [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *t) { [self victoryTick]; }];
+    [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(NSTimer *t) { [self rainbowTick]; }];
+    [NSTimer scheduledTimerWithTimeInterval:3.0 repeats:YES block:^(NSTimer *t) { [self victoryTick]; }];
+    [NSTimer scheduledTimerWithTimeInterval:30.0 repeats:YES block:^(NSTimer *t) { [self flushStats]; }];
     self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(frame)];
+    self.link.paused = YES; // счётчик FPS работает, только когда включён
     [self.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     [self bumpStat:@"launches" by:1];
 }
 
 #pragma mark - статистика
 
-- (NSDictionary *)stats { return [FDefaults() dictionaryForKey:kStats] ?: @{}; }
-- (void)resetStats { [FDefaults() removeObjectForKey:kStats]; }
+// статистика копится в памяти и пишется на диск раз в 30 сек
+static NSMutableDictionary *gStats;
+- (NSMutableDictionary *)mstats {
+    if (!gStats) gStats = [[FDefaults() dictionaryForKey:kStats] mutableCopy] ?: [NSMutableDictionary new];
+    return gStats;
+}
+- (NSDictionary *)stats { return [[self mstats] copy]; }
+- (void)resetStats { gStats = [NSMutableDictionary new]; [FDefaults() removeObjectForKey:kStats]; }
+- (void)flushStats { if (gStats) [FDefaults() setObject:gStats forKey:kStats]; }
 
 - (void)bumpStat:(NSString *)k by:(double)v {
-    NSMutableDictionary *d = [[self stats] mutableCopy];
+    NSMutableDictionary *d = [self mstats];
     d[k] = @([d[k] doubleValue] + v);
-    [FDefaults() setObject:d forKey:kStats];
 }
 
 - (void)maxStat:(NSString *)k value:(double)v {
-    NSMutableDictionary *d = [[self stats] mutableCopy];
-    if (v > [d[k] doubleValue]) { d[k] = @(v); [FDefaults() setObject:d forKey:kStats]; }
+    NSMutableDictionary *d = [self mstats];
+    if (v > [d[k] doubleValue]) d[k] = @(v);
 }
 
 - (void)countThrow:(NSUInteger)combo {
@@ -62,6 +75,42 @@
     [self applySpeed];
     [self applyNight];
     [self updateFPSLabelVisibility];
+    [self updateClock];
+    [self updateShake];
+    if (FBool(kFunParty) && ++self.partyTicks % 20 == 0) [self confettiNow];
+}
+
+- (void)updateClock {
+    UIView *host = [[FlideFX shared] overlayView];
+    if (!FBool(kFunClock) || !host) { [self.clockLabel removeFromSuperview]; self.clockLabel = nil; return; }
+    if (!self.clockLabel) {
+        self.clockLabel = [UILabel new];
+        self.clockLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold];
+        self.clockLabel.textColor = UIColor.whiteColor;
+        self.clockLabel.textAlignment = NSTextAlignmentCenter;
+        self.clockLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+        self.clockLabel.layer.cornerRadius = 8; self.clockLabel.clipsToBounds = YES;
+        [host addSubview:self.clockLabel];
+    }
+    self.clockLabel.frame = CGRectMake(host.bounds.size.width - host.safeAreaInsets.right - 70, host.safeAreaInsets.top + 6, 62, 20);
+    NSDateFormatter *df = [NSDateFormatter new];
+    df.dateFormat = @"HH:mm";
+    self.clockLabel.text = [df stringFromDate:NSDate.date];
+}
+
+// встряхни телефон — конфетти (акселерометр, без разрешений)
+- (void)updateShake {
+    BOOL on = FBool(kFunShakeConfetti);
+    if (!on) { if (self.motion.accelerometerActive) [self.motion stopAccelerometerUpdates]; return; }
+    if (!self.motion) self.motion = [CMMotionManager new];
+    if (self.motion.accelerometerActive || !self.motion.accelerometerAvailable) return;
+    self.motion.accelerometerUpdateInterval = 0.1;
+    __weak typeof(self) ws = self;
+    [self.motion startAccelerometerUpdatesToQueue:NSOperationQueue.mainQueue withHandler:^(CMAccelerometerData *d, NSError *e) {
+        double g = sqrt(d.acceleration.x * d.acceleration.x + d.acceleration.y * d.acceleration.y + d.acceleration.z * d.acceleration.z);
+        CFTimeInterval now = CACurrentMediaTime();
+        if (g > 2.6 && now - ws.lastShake > 3) { ws.lastShake = now; [ws confettiNow]; }
+    }];
 }
 
 - (void)applySpeed {
@@ -104,7 +153,9 @@
 
 - (void)updateFPSLabelVisibility {
     UIView *host = [[FlideFX shared] overlayView];
-    if (!FBool(kFunFPS) || !host) { [self.fpsLabel removeFromSuperview]; self.fpsLabel = nil; return; }
+    BOOL on = FBool(kFunFPS) && host;
+    self.link.paused = !on;
+    if (!on) { [self.fpsLabel removeFromSuperview]; self.fpsLabel = nil; return; }
     if (self.fpsLabel) return;
     self.fpsLabel = [UILabel new];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightBold];
@@ -118,7 +169,8 @@
 #pragma mark - радужные тексты
 
 - (void)rainbowTick {
-    BOOL on = FBool(kFunRainbow);
+    BOOL on = FBool(kFunRainbow) || FBool(kFunParty);
+    if (!on && !self.rainbowWasOn) return; // выключено — ноль работы
     if (!FIL_Ready()) return;
     Il2CppClass *graphic = FIL_Class("UnityEngine.UI", "Graphic");
     if (!on) {
@@ -137,7 +189,7 @@
     }
     self.rainbowWasOn = YES;
     CFTimeInterval now = CACurrentMediaTime();
-    if (now - self.lastRainbowScan > 3) {
+    if (now - self.lastRainbowScan > 5) {
         self.lastRainbowScan = now;
         NSMutableArray *objs = [NSMutableArray new];
         if (FIL_Class("TMPro", "TMP_Text")) [objs addObjectsFromArray:FIL_FindAll("TMPro", "TMP_Text")];
@@ -155,7 +207,7 @@
             float *c = FIL_Unbox(FIL_Call0(v.pointerValue, "get_color"));
             if (c) self.rainbowOrig[@(h)] = [NSData dataWithBytes:c length:16];
             [self.rainbowHandles addObject:@(h)];
-            if (self.rainbowHandles.count > 120) break;
+            if (self.rainbowHandles.count > 60) break;
         }
     }
     NSUInteger i = 0;

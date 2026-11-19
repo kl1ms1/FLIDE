@@ -46,7 +46,7 @@ NSString *FlideBootLogoPath(void) {
     [card.contentView addSubview:title];
 
     UILabel *sub = [[UILabel alloc] initWithFrame:CGRectMake(0, 82, 260, 20)];
-    sub.text = @"кастомизация · без рекламы";
+    sub.text = L(@"кастомизация · без рекламы");
     sub.textAlignment = NSTextAlignmentCenter;
     sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     sub.textColor = [UIColor colorWithWhite:1 alpha:0.7];
@@ -204,7 +204,7 @@ NSString *FlideBootLogoPath(void) {
     return [png writeToFile:FlideBootLogoPath() atomically:YES];
 }
 
-+ (NSArray<NSString *> *)animationNames { return @[@"Пружинка", @"Вспышка", @"Глитч", @"Печатная машинка"]; }
++ (NSArray<NSString *> *)animationNames { return @[L(@"Пружинка"), L(@"Вспышка"), L(@"Глитч"), L(@"Печатная машинка")]; }
 
 + (BOOL)hasCustomImage {
     return [NSFileManager.defaultManager fileExistsAtPath:FlideBootLogoPath()];

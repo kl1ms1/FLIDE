@@ -9,9 +9,9 @@
 typedef NS_ENUM(NSInteger, FFit) { FFitFill, FFitFit, FFitStretch };
 
 NSArray<NSString *> *FlideFilterNames(void) {
-    return @[@"Без фильтра", @"Неон", @"Ч/Б", @"Инверсия", @"Тёплый", @"Холодный",
-             @"Пиксели", @"Комикс", @"Постер", @"Сочный", @"Винтаж", @"Тьма",
-             @"Пастель", @"Протанопия", @"Дейтеранопия", @"Тританопия"];
+    return @[L(@"Без фильтра"), L(@"Неон"), L(@"Ч/Б"), L(@"Инверсия"), L(@"Тёплый"), L(@"Холодный"),
+             L(@"Пиксели"), L(@"Комикс"), L(@"Постер"), L(@"Сочный"), L(@"Винтаж"), L(@"Тьма"),
+             L(@"Пастель"), L(@"Протанопия"), L(@"Дейтеранопия"), L(@"Тританопия")];
 }
 
 static CIContext *ciContext(void) {
@@ -169,12 +169,12 @@ UIImage *FlideFilterImage(UIImage *src, NSInteger filter, float hue, float stren
     [x addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
     [c addSubview:x];
 
-    self.leftView = [self previewView:@"СЕЙЧАС"];
-    self.rightView = [self previewView:@"БУДЕТ"];
+    self.leftView = [self previewView:L(@"СЕЙЧАС")];
+    self.rightView = [self previewView:L(@"БУДЕТ")];
     [c addSubview:self.leftView];
     [c addSubview:self.rightView];
 
-    self.fit = [[UISegmentedControl alloc] initWithItems:@[@"Заполнить", @"Вписать", @"Растянуть"]];
+    self.fit = [[UISegmentedControl alloc] initWithItems:@[L(@"Заполнить"), L(@"Вписать"), L(@"Растянуть")]];
     self.fit.selectedSegmentIndex = 0;
     [self.fit addTarget:self action:@selector(render) forControlEvents:UIControlEventValueChanged];
     [c addSubview:self.fit];
@@ -214,11 +214,11 @@ UIImage *FlideFilterImage(UIImage *src, NSInteger filter, float hue, float stren
     [c addSubview:self.strength];
 
     self.buttons = [[UIStackView alloc] initWithArrangedSubviews:@[
-        [self button:@"🖼 Фото" action:@selector(pickPhoto) tint:nil],
-        [self button:@"↺ Оригинал" action:@selector(restore) tint:nil],
+        [self button:L(@"🖼 Фото") action:@selector(pickPhoto) tint:nil],
+        [self button:L(@"↺ Оригинал") action:@selector(restore) tint:nil],
         [self button:@"⬇︎ PNG" action:@selector(savePNG) tint:nil],
-        [self button:@"🎞 Анимация" action:@selector(pickAnimation) tint:nil],
-        [self button:@"✦ Применить" action:@selector(apply) tint:self.hue.tintColor],
+        [self button:L(@"🎞 Анимация") action:@selector(pickAnimation) tint:nil],
+        [self button:L(@"✦ Применить") action:@selector(apply) tint:self.hue.tintColor],
     ]];
     self.buttons.distribution = UIStackViewDistributionFillEqually;
     self.buttons.spacing = 8;
@@ -276,8 +276,8 @@ UIImage *FlideFilterImage(UIImage *src, NSInteger filter, float hue, float stren
     if (wh.count == 2) self.texSize = CGSizeMake([wh[0] doubleValue], [wh[1] doubleValue]);
     self.leftView.image = self.current;
     if (!self.current) [self toast:FlideGuardTripped(@"preview")
-        ? @"Превью отключено после вылета. Включи в «Главное → Восстановить функции»"
-        : @"Не удалось прочитать текстуру — но заменить её всё равно можно"];
+        ? L(@"Превью отключено после вылета. Включи в «Главное → Восстановить функции»")
+        : L(@"Не удалось прочитать текстуру — но заменить её всё равно можно")];
 }
 
 - (UIImage *)composeAtScale:(CGFloat)scale {
@@ -376,13 +376,13 @@ static NSArray<UIImage *> *framesFromGIF(NSData *data, double *fps) {
     }
     dispatch_group_notify(g, dispatch_get_main_queue(), ^{
         for (NSNumber *k in [byIndex.allKeys sortedArrayUsingSelector:@selector(compare:)]) [frames addObject:byIndex[k]];
-        if (frames.count < 2) { [self toast:@"Нужно минимум 2 кадра или GIF"]; return; }
+        if (frames.count < 2) { [self toast:L(@"Нужно минимум 2 кадра или GIF")]; return; }
         NSMutableArray *styled = [NSMutableArray new];
         UIImage *keep = self.source;
         for (UIImage *f in frames) @autoreleasepool { self.source = f; [styled addObject:[self composeAtScale:1.0] ?: f]; }
         self.source = keep;
         BOOL ok = [[FlidePacks shared] setAnimationForTexture:self.item.name frames:styled fps:fps size:self.texSize];
-        [self toast:ok ? [NSString stringWithFormat:@"Анимация: %lu кадров ✦", (unsigned long)styled.count] : @"Не получилось"];
+        [self toast:ok ? [NSString stringWithFormat:L(@"Анимация: %lu кадров ✦"), (unsigned long)styled.count] : L(@"Не получилось")];
     });
 }
 
@@ -422,7 +422,7 @@ static NSArray<UIImage *> *framesFromGIF(NSData *data, double *fps) {
         self.current = [[FlideEngine shared] imageOfTexture:self.item maxSide:1024] ?: full;
         self.leftView.image = self.current;
     }
-    [self toast:ok ? @"Применено в игре ✦" : @"Не получилось заменить"];
+    [self toast:ok ? L(@"Применено в игре ✦") : L(@"Не получилось заменить")];
 }
 
 - (void)restore {
@@ -431,7 +431,7 @@ static NSArray<UIImage *> *framesFromGIF(NSData *data, double *fps) {
     if (orig) { self.source = orig; [self render]; }
     self.current = [[FlideEngine shared] imageOfTexture:self.item maxSide:1024] ?: self.current;
     self.leftView.image = self.current;
-    [self toast:instant ? @"Оригинал вернулся" : @"Оригинал вернётся после перезапуска"];
+    [self toast:instant ? L(@"Оригинал вернулся") : L(@"Оригинал вернётся после перезапуска")];
 }
 
 - (void)savePNG {
@@ -439,7 +439,7 @@ static NSArray<UIImage *> *framesFromGIF(NSData *data, double *fps) {
     NSString *path = [FlideDir(@"export") stringByAppendingPathComponent:
                       [[self.item.name stringByReplacingOccurrencesOfString:@"/" withString:@"_"] stringByAppendingString:@"_flide.png"]];
     BOOL ok = img && [UIImagePNGRepresentation(img) writeToFile:path atomically:YES];
-    [self toast:ok ? @"Сохранено в FLIDE/export" : @"Не получилось"];
+    [self toast:ok ? L(@"Сохранено в FLIDE/export") : L(@"Не получилось")];
 }
 
 @end

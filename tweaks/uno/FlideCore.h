@@ -36,6 +36,16 @@
 #define kPackActive   @"flide.pack.active"
 #define kTableAnim    @"flide.tableanim"     // {texture, fps}
 #define kStats        @"flide.stats"
+#define kFxRandom     @"flide.fx.random"     // случайный стиль на каждый бросок
+#define kFunParty     @"flide.fun.party"
+#define kFunClock     @"flide.fun.clock"
+#define kFunShakeConfetti @"flide.fun.shakeconfetti"
+#define kLang         @"flide.lang"          // ru / en
+#define kUIAccent     @"flide.ui.accent"
+#define kUIGlass      @"flide.ui.glass"      // 0 жидкое стекло, 1 матовое, 2 тёмное
+#define kUIScale      @"flide.ui.scale"      // 0 компактно, 1 обычно, 2 крупно
+#define kUILabels     @"flide.ui.labels"     // подписи в панели запуска
+#define kUIAnim       @"flide.ui.anim"
 
 static inline NSUserDefaults *FDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static inline BOOL FBool(NSString *k) { return [FDefaults() boolForKey:k]; }
@@ -48,6 +58,9 @@ void FlideGuardReset(void);
 UIColor  *FlideColorFromHex(NSString *hex);
 NSString *FlideHexFromColor(UIColor *c);
 UIView   *FlideGlass(CGFloat radius);       // стеклянная подложка (Liquid Glass на iOS 26)
+UIColor  *FlideAccent(void);                // цвет интерфейса меню
+NSString *FlideL(NSString *ru);             // перевод строки на выбранный язык
+#define L(s) FlideL(s)
 
 // ---------- фильтры картинок (редактор и темы) ----------
 NSArray<NSString *> *FlideFilterNames(void);
@@ -60,6 +73,15 @@ typedef NS_ENUM(NSInteger, FlideFxStyle) {
     FlideFxFire,
     FlideFxStars,
     FlideFxRunes,        // символы-руны по спирали
+    FlideFxGalaxy,       // вращающаяся туманность
+    FlideFxLightning,    // молнии
+    FlideFxSakura,       // лепестки сакуры
+    FlideFxSnow,
+    FlideFxBubbles,
+    FlideFxHalo,         // нимб
+    FlideFxHearts,
+    FlideFxNeon,         // неоновое кольцо-радуга
+    FlideFxVoid,         // чёрная дыра
     FlideFxStyleCount
 };
 NSString *FlideFxStyleName(FlideFxStyle s);
@@ -200,4 +222,5 @@ BOOL FlideIsClone(void);
 + (void)show;                // панель запуска
 + (BOOL)isOverlayWindow:(UIWindow *)w;
 + (UIView *)overlayRoot;     // интерактивный слой окон FLIDE
++ (void)rebuildAll;          // пересобрать окна (язык, вид)
 @end

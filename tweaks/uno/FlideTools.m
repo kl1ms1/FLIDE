@@ -209,7 +209,7 @@
         void (^fin)(NSError *) = ^(NSError *e) { dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(e); }); };
         if (on) [r startClipBufferingWithCompletionHandler:fin];
         else [r stopClipBufferingWithCompletionHandler:fin];
-    } else if (done) done([NSError errorWithDomain:@"FLIDE" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Нужна iOS 15+"}]);
+    } else if (done) done([NSError errorWithDomain:@"FLIDE" code:1 userInfo:@{NSLocalizedDescriptionKey: L(@"Нужна iOS 15+")}]);
 }
 
 - (void)exportClip:(void (^)(NSURL *, NSError *))done {
@@ -221,7 +221,7 @@
         [RPScreenRecorder.sharedRecorder exportClipToURL:url duration:30 completionHandler:^(NSError *e) {
             dispatch_async(dispatch_get_main_queue(), ^{ done(e ? nil : url, e); });
         }];
-    } else done(nil, [NSError errorWithDomain:@"FLIDE" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Нужна iOS 15+"}]);
+    } else done(nil, [NSError errorWithDomain:@"FLIDE" code:1 userInfo:@{NSLocalizedDescriptionKey: L(@"Нужна iOS 15+")}]);
 }
 
 @end

@@ -42,16 +42,16 @@
 - (void)removeCustomEmote:(NSString *)path { [NSFileManager.defaultManager removeItemAtPath:path error:nil]; }
 
 - (NSArray<NSDictionary *> *)builtinGifts {
-    return @[@{@"id": @"cake",    @"title": @"Торт",      @"icon": @"🎂"},
-             @{@"id": @"crown",   @"title": @"Корона",    @"icon": @"👑"},
-             @{@"id": @"fire",    @"title": @"Фейерверк", @"icon": @"🎆"},
-             @{@"id": @"hearts",  @"title": @"Сердца",    @"icon": @"💖"},
-             @{@"id": @"roses",   @"title": @"Розы",      @"icon": @"🌹"},
-             @{@"id": @"rocket",  @"title": @"Ракета",    @"icon": @"🚀"},
-             @{@"id": @"diamond", @"title": @"Алмаз",     @"icon": @"💎"},
-             @{@"id": @"cup",     @"title": @"Кубок",     @"icon": @"🏆"},
-             @{@"id": @"money",   @"title": @"Дождь",     @"icon": @"💸"},
-             @{@"id": @"ghost",   @"title": @"Призрак",   @"icon": @"👻"}];
+    return @[@{@"id": @"cake",    @"title": L(@"Торт"),      @"icon": @"🎂"},
+             @{@"id": @"crown",   @"title": L(@"Корона"),    @"icon": @"👑"},
+             @{@"id": @"fire",    @"title": L(@"Фейерверк"), @"icon": @"🎆"},
+             @{@"id": @"hearts",  @"title": L(@"Сердца"),    @"icon": @"💖"},
+             @{@"id": @"roses",   @"title": L(@"Розы"),      @"icon": @"🌹"},
+             @{@"id": @"rocket",  @"title": L(@"Ракета"),    @"icon": @"🚀"},
+             @{@"id": @"diamond", @"title": L(@"Алмаз"),     @"icon": @"💎"},
+             @{@"id": @"cup",     @"title": L(@"Кубок"),     @"icon": @"🏆"},
+             @{@"id": @"money",   @"title": L(@"Дождь"),     @"icon": @"💸"},
+             @{@"id": @"ghost",   @"title": L(@"Призрак"),   @"icon": @"👻"}];
 }
 - (NSArray<NSString *> *)customGifts { return [self filesIn:@"gifts"]; }
 - (BOOL)addCustomGift:(UIImage *)img { return [self save:img into:@"gifts"]; }

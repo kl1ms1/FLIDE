@@ -47,7 +47,8 @@ static void guardEnd(void) { [FDefaults() removeObjectForKey:kGuard]; }
 @property (nonatomic, strong) NSMutableArray<NSNumber *> *pinned;
 @property (nonatomic, strong) NSMutableSet<NSNumber *> *replacedIDs, *hdIDs;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *textTargets, *elementTargets;
-@property (nonatomic, assign) CFTimeInterval lastTextScan, lastElementScan;
+@property (nonatomic, assign) CFTimeInterval lastTextScan, lastElementScan, seenBorn;
+@property (nonatomic, strong) NSMutableSet<NSValue *> *seenTex;
 @end
 
 @implementation FlideEngine
@@ -71,8 +72,8 @@ static void guardEnd(void) { [FDefaults() removeObjectForKey:kGuard]; }
 
 - (void)start {
     // Unity крутит свой цикл на главном потоке — там же вызываем il2cpp
-    [NSTimer scheduledTimerWithTimeInterval:3.0 repeats:YES block:^(NSTimer *t) { [self slowTick]; }];
-    [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *t) { [self textTick]; }];
+    [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *t) { [self slowTick]; }];
+    [NSTimer scheduledTimerWithTimeInterval:0.4 repeats:YES block:^(NSTimer *t) { [self textTick]; }];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [self applyQuality]; });
 }
 
@@ -97,7 +98,7 @@ static void guardEnd(void) { [FDefaults() removeObjectForKey:kGuard]; }
         if (w < 16 || h < 16) continue;
         FlideItem *it = [FlideItem new];
         NSString *n = FIL_Name(tex);
-        it.name = n.length ? n : @"(без имени)";
+        it.name = n.length ? n : L(@"(без имени)");
         it.detail = [NSString stringWithFormat:@"%d×%d", w, h];
         it.instanceID = FIL_InstanceID(tex);
         it.handle = FIL_Pin(tex);
@@ -239,6 +240,7 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     idx[item.name] = file;
     [FDefaults() setObject:idx forKey:kTextures];
     [self.replacedIDs addObject:@(item.instanceID)];
+    self.seenTex = nil; // другие копии с тем же именем подхватятся на следующем тике
     item.preview = nil;
     return YES;
 }
@@ -271,6 +273,7 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
 
 - (void)reapplyReplacements {
     [self.replacedIDs removeAllObjects];
+    self.seenTex = nil;
     [self slowTick];
 }
 
@@ -299,7 +302,15 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     NSDictionary *idx = [FDefaults() dictionaryForKey:kTextures];
     BOOL hd = FBool(kHD);
     if (!idx.count && !hd) return;
+    // Обрабатываем только НОВЫЕ текстуры: уже виденные указатели пропускаем без
+    // единого вызова в Unity. Раз в минуту — полный проход на всякий случай.
+    CFTimeInterval now = CACurrentMediaTime();
+    if (!self.seenTex || now - self.seenBorn > 60) { self.seenTex = [NSMutableSet new]; self.seenBorn = now; }
+    NSUInteger budget = 80; // не больше 80 новых текстур за тик — без рывков
     for (NSValue *v in FIL_FindAll("UnityEngine", "Texture2D")) {
+        if ([self.seenTex containsObject:v]) continue;
+        if (budget-- == 0) break;
+        [self.seenTex addObject:v];
         void *tex = v.pointerValue;
         NSNumber *iid = @(FIL_InstanceID(tex));
         if (hd && ![self.hdIDs containsObject:iid]) { [self hdTexture:tex]; [self.hdIDs addObject:iid]; }
@@ -378,7 +389,7 @@ static NSArray<NSValue *> *allTextObjects(void) {
     for (NSString *p in streamer) if (!rules[p]) rules[p] = @"⟪FLIDE-STREAMER⟫"; // маркер
     if (!rules.count || !FIL_Ready()) return;
     CFTimeInterval now = CACurrentMediaTime();
-    if (now - self.lastTextScan > 2.5) {
+    if (now - self.lastTextScan > 4.0) {
         self.lastTextScan = now;
         [self refreshTargets:self.textTargets forPaths:rules.allKeys objects:allTextObjects()];
     }
@@ -388,7 +399,7 @@ static NSArray<NSValue *> *allTextObjects(void) {
         for (NSNumber *h in self.textTargets[path]) {
             void *o = FIL_Target(h.unsignedIntValue);
             if (!o) continue;
-            NSString *want = masked ? [NSString stringWithFormat:@"Игрок %d", player++] : text;
+            NSString *want = masked ? [NSString stringWithFormat:L(@"Игрок %d"), player++] : text;
             NSString *cur = FIL_ToNSString(FIL_Call0(o, "get_text"));
             if (cur && ![cur isEqualToString:want]) FIL_Call1(o, "set_text", FIL_NewString(want));
         }
@@ -426,7 +437,7 @@ static NSArray<NSValue *> *allTextObjects(void) {
         }
         // не нашли — сцена могла смениться; пересканируем не чаще раза в 5 сек
         CFTimeInterval now = CACurrentMediaTime();
-        if (now - self.lastElementScan < 5.0) break;
+        if (now - self.lastElementScan < 8.0) break;
         self.lastElementScan = now;
         NSMutableSet *paths = [NSMutableSet setWithArray:[[FDefaults() dictionaryForKey:kAuras] allKeys] ?: @[]];
         [paths addObject:path];

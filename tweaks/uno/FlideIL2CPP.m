@@ -1,6 +1,7 @@
 #import "FlideIL2CPP.h"
 #import <UIKit/UIKit.h>
 #import <dlfcn.h>
+#import <QuartzCore/QuartzCore.h>
 
 #define SYM(ret, name, ...) static ret (*p_##name)(__VA_ARGS__);
 
@@ -208,7 +209,13 @@ NSArray<NSValue *> *FIL_FindAll(const char *ns, const char *cls) {
 NSString *FIL_Name(Il2CppObject *o) { return FIL_ToNSString(FIL_Call0(o, "get_name")) ?: @""; }
 int FIL_InstanceID(Il2CppObject *o) { return FIL_Int(FIL_Call0(o, "GetInstanceID")); }
 
-NSString *FIL_Path(Il2CppObject *component) {
+// ---------- кэши (главная оптимизация: не дёргать Unity лишний раз) ----------
+// Путь объекта почти не меняется, а считать его дорого (десятки вызовов в Unity).
+// Кэш по указателю живёт 30 сек — так безопасно даже при переиспользовании памяти.
+static NSMutableDictionary<NSValue *, NSString *> *gPathCache;
+static CFTimeInterval gPathCacheBorn;
+
+static NSString *computePath(Il2CppObject *component) {
     NSMutableArray *parts = [NSMutableArray array];
     Il2CppObject *t = FIL_Call0(component, "get_transform");
     for (int depth = 0; t && depth < 14; depth++) {
@@ -216,6 +223,18 @@ NSString *FIL_Path(Il2CppObject *component) {
         t = FIL_Call0(t, "get_parent");
     }
     return [parts componentsJoinedByString:@"/"];
+}
+
+NSString *FIL_Path(Il2CppObject *component) {
+    CFTimeInterval now = CACurrentMediaTime();
+    if (!gPathCache || now - gPathCacheBorn > 30 || gPathCache.count > 6000) {
+        gPathCache = [NSMutableDictionary new];
+        gPathCacheBorn = now;
+    }
+    NSValue *key = [NSValue valueWithPointer:component];
+    NSString *p = gPathCache[key];
+    if (!p) { p = computePath(component); gPathCache[key] = p; }
+    return p;
 }
 
 BOOL FIL_ActiveInHierarchy(Il2CppObject *component) {
@@ -242,8 +261,15 @@ BOOL FIL_ScreenPoint(Il2CppObject *component, CGPoint *out) {
         if (!sp) return NO;
         sx = sp->x; sy = sp->y;
     }
-    int sw = FIL_Int(FIL_Static("UnityEngine", "Screen", "get_width", 0, NULL));
-    int sh = FIL_Int(FIL_Static("UnityEngine", "Screen", "get_height", 0, NULL));
+    // размер экрана меняется редко — спрашиваем Unity раз в секунду
+    static int sw = 0, sh = 0;
+    static CFTimeInterval screenAt = 0;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - screenAt > 1.0) {
+        sw = FIL_Int(FIL_Static("UnityEngine", "Screen", "get_width", 0, NULL));
+        sh = FIL_Int(FIL_Static("UnityEngine", "Screen", "get_height", 0, NULL));
+        screenAt = now;
+    }
     if (sw <= 0 || sh <= 0) return NO;
     CGSize ui = UIScreen.mainScreen.bounds.size;
     if ((sw > sh) != (ui.width > ui.height)) ui = CGSizeMake(ui.height, ui.width);
