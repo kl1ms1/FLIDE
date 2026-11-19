@@ -18,6 +18,31 @@ static NSString *safeFileName(NSString *s) {
 @implementation FlideItem
 @end
 
+// ---------- защита от вылетов ----------
+// Перед рискованным вызовом пишем метку; если игра упала — при следующем запуске
+// метка останется, и эта функция отключится сама.
+#define kGuard @"flide.guard"
+
+BOOL FlideGuardTripped(NSString *op) {
+    NSArray *bad = [FDefaults() arrayForKey:@"flide.disabled"] ?: @[];
+    return [bad containsObject:op];
+}
+
+void FlideGuardCheckOnLaunch(void) {
+    NSString *op = [FDefaults() stringForKey:kGuard];
+    if (!op) return;
+    NSMutableArray *bad = [[FDefaults() arrayForKey:@"flide.disabled"] mutableCopy] ?: [NSMutableArray new];
+    if (![bad containsObject:op]) [bad addObject:op];
+    [FDefaults() setObject:bad forKey:@"flide.disabled"];
+    [FDefaults() removeObjectForKey:kGuard];
+    FLog(@"guard: '%@' вызвал вылет — отключено", op);
+}
+
+void FlideGuardReset(void) { [FDefaults() removeObjectForKey:@"flide.disabled"]; }
+
+static void guardBegin(NSString *op) { [FDefaults() setObject:op forKey:kGuard]; [FDefaults() synchronize]; }
+static void guardEnd(void) { [FDefaults() removeObjectForKey:kGuard]; }
+
 @interface FlideEngine ()
 @property (nonatomic, strong) NSMutableArray<NSNumber *> *pinned;
 @property (nonatomic, strong) NSMutableSet<NSNumber *> *replacedIDs, *hdIDs;
@@ -53,14 +78,18 @@ static NSString *safeFileName(NSString *s) {
 
 #pragma mark - текстуры
 
-- (void)unpinAll {
-    for (NSNumber *h in self.pinned) FIL_Unpin(h.unsignedIntValue);
-    [self.pinned removeAllObjects];
+- (void)releaseItems:(NSArray<FlideItem *> *)items {
+    for (FlideItem *it in items) { FIL_Unpin(it.handle); it.handle = 0; }
+}
+
+- (BOOL)screenPointForItem:(FlideItem *)item point:(CGPoint *)pt {
+    void *o = FIL_Target(item.handle);
+    return o && FIL_ActiveInHierarchy(o) && FIL_ScreenPoint(o, pt);
 }
 
 - (NSArray<FlideItem *> *)scanTextures {
-    if (!FIL_Ready()) return @[];
-    [self unpinAll];
+    if (!FIL_Ready() || FlideGuardTripped(@"scan")) return @[];
+    guardBegin(@"scan");
     NSMutableArray *out = [NSMutableArray new];
     for (NSValue *v in FIL_FindAll("UnityEngine", "Texture2D")) {
         void *tex = v.pointerValue;
@@ -72,9 +101,9 @@ static NSString *safeFileName(NSString *s) {
         it.detail = [NSString stringWithFormat:@"%d×%d", w, h];
         it.instanceID = FIL_InstanceID(tex);
         it.handle = FIL_Pin(tex);
-        [self.pinned addObject:@(it.handle)];
         [out addObject:it];
     }
+    guardEnd();
     [out sortUsingComparator:^NSComparisonResult(FlideItem *a, FlideItem *b) {
         return [a.name localizedCaseInsensitiveCompare:b.name];
     }];
@@ -153,7 +182,25 @@ static NSString *safeFileName(NSString *s) {
 }
 
 - (UIImage *)imageOfTexture:(FlideItem *)item maxSide:(int)maxSide {
-    return [self imageOfTextureObject:FIL_Target(item.handle) maxSide:maxSide];
+    if (FlideGuardTripped(@"preview")) return nil;
+    guardBegin(@"preview");
+    UIImage *img = [self imageOfTextureObject:FIL_Target(item.handle) maxSide:maxSide];
+    guardEnd();
+    return img;
+}
+
+- (NSString *)originalPath:(FlideItem *)item {
+    return [FlideDir(@"originals") stringByAppendingPathComponent:[safeFileName(item.name) stringByAppendingPathExtension:@"png"]];
+}
+
+- (UIImage *)originalOfTexture:(FlideItem *)item {
+    NSString *path = [self originalPath:item];
+    UIImage *saved = [UIImage imageWithContentsOfFile:path];
+    if (saved) return saved;
+    if ([FDefaults() dictionaryForKey:kTextures][item.name]) return nil; // уже заменена, оригинал не сохранён
+    UIImage *img = [self imageOfTexture:item maxSide:4096];
+    if (img) [UIImagePNGRepresentation(img) writeToFile:path atomically:YES];
+    return img;
 }
 
 static NSData *pngFitted(UIImage *image, int w, int h) {
@@ -182,6 +229,7 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     void *tex = FIL_Target(item.handle);
     if (!tex || !image) return NO;
     int w = FIL_Int(FIL_Call0(tex, "get_width")), h = FIL_Int(FIL_Call0(tex, "get_height"));
+    [self originalOfTexture:item]; // сохраним оригинал, чтобы можно было вернуть
     NSData *png = pngFitted(image, w, h); // размер как у оригинала — спрайты в атласе не съедут
     if (![self loadPNG:png intoTexture:tex]) return NO;
 
@@ -195,12 +243,16 @@ static NSData *pngFitted(UIImage *image, int w, int h) {
     return YES;
 }
 
-- (void)resetTexture:(FlideItem *)item {
+- (BOOL)resetTexture:(FlideItem *)item {
+    BOOL restored = NO;
+    NSData *orig = [NSData dataWithContentsOfFile:[self originalPath:item]];
+    if (orig) restored = [self loadPNG:orig intoTexture:FIL_Target(item.handle)];
     NSMutableDictionary *idx = [[FDefaults() dictionaryForKey:kTextures] mutableCopy];
     NSString *file = idx[item.name];
     if (file) [NSFileManager.defaultManager removeItemAtPath:[FlideDir(@"textures") stringByAppendingPathComponent:file] error:nil];
     [idx removeObjectForKey:item.name];
     [FDefaults() setObject:idx ?: @{} forKey:kTextures];
+    return restored;
 }
 
 - (NSURL *)exportTexture:(FlideItem *)item {
@@ -275,7 +327,6 @@ static NSArray<NSValue *> *allTextObjects(void) {
 
 - (NSArray<FlideItem *> *)scanTexts {
     if (!FIL_Ready()) return @[];
-    [self unpinAll];
     NSMutableArray *out = [NSMutableArray new];
     for (NSValue *v in allTextObjects()) {
         void *o = v.pointerValue;
@@ -286,7 +337,6 @@ static NSArray<NSValue *> *allTextObjects(void) {
         it.name = FIL_Path(o);
         it.detail = txt;
         it.handle = FIL_Pin(o);
-        [self.pinned addObject:@(it.handle)];
         [out addObject:it];
     }
     return out;
@@ -337,7 +387,6 @@ static NSArray<NSValue *> *allTextObjects(void) {
 
 - (NSArray<FlideItem *> *)scanElements {
     if (!FIL_Ready()) return @[];
-    [self unpinAll];
     NSMutableArray *out = [NSMutableArray new];
     NSMutableSet *seen = [NSMutableSet new];
     for (NSValue *v in FIL_FindAll("UnityEngine.UI", "Graphic")) {
@@ -349,6 +398,7 @@ static NSArray<NSValue *> *allTextObjects(void) {
         FlideItem *it = [FlideItem new];
         it.name = p;
         it.detail = @(FIL_ClassName(FIL_ClassOf(o)));
+        it.handle = FIL_Pin(o);
         [out addObject:it];
     }
     [out sortUsingComparator:^NSComparisonResult(FlideItem *a, FlideItem *b) { return [a.name compare:b.name]; }];

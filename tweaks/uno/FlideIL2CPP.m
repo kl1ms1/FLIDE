@@ -27,6 +27,7 @@ SYM(void, il2cpp_gchandle_free, uint32_t)
 SYM(void *, il2cpp_thread_attach, void *)
 SYM(void *, il2cpp_get_corlib, void)
 SYM(void *, il2cpp_object_new, void *)
+SYM(void, il2cpp_free, void *)
 SYM(const MethodInfo *, il2cpp_class_get_methods, void *, void **)
 SYM(const char *, il2cpp_method_get_name, const MethodInfo *)
 SYM(uint32_t, il2cpp_method_get_param_count, const MethodInfo *)
@@ -50,6 +51,7 @@ static BOOL loadSymbols(void) {
     L(il2cpp_method_get_param) L(il2cpp_type_get_name)
 #undef L
     p_il2cpp_gchandle_free = (__typeof__(p_il2cpp_gchandle_free))dlsym(h, "il2cpp_gchandle_free");
+    p_il2cpp_free = (__typeof__(p_il2cpp_free))dlsym(h, "il2cpp_free");
     if (!p_il2cpp_domain_get()) return NO;
     p_il2cpp_thread_attach(p_il2cpp_domain_get());
     gReady = YES;
@@ -109,7 +111,8 @@ const MethodInfo *FIL_MethodSig(Il2CppClass *k, const char *name, const char *si
             for (uint32_t i = 0; i < want.count && match; i++) {
                 char *tn = p_il2cpp_type_get_name(p_il2cpp_method_get_param(m, i));
                 match = tn && strcmp(tn, [want[i] UTF8String]) == 0;
-                if (tn) free(tn);
+                // строка выделена аллокатором Unity — обычный free() роняет игру
+                if (tn && p_il2cpp_free) p_il2cpp_free(tn);
             }
             if (match) { gMethodCache[key] = [NSValue valueWithPointer:m]; return m; }
         }
