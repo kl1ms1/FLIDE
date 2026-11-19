@@ -114,6 +114,7 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 // тексты
 - (NSArray<FlideItem *> *)scanTexts;
 - (void)setOverride:(NSString *)text forPath:(NSString *)path;
+- (void)resetEverything;                          // тексты и текстуры — к исходным, сразу
 
 // элементы интерфейса для эффектов
 - (NSArray<FlideItem *> *)scanElements;
@@ -185,6 +186,7 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (void)toggleDrawingIn:(UIView *)host;
 - (void)addSticker:(UIImage *)img in:(UIView *)host;
 - (void)clearStickers;
+- (void)clearAll;                                     // стикеры + рисунок
 - (UIImage *)cleanScreenshot;                         // кадр игры без окон FLIDE
 - (void)setClipBuffering:(BOOL)on completion:(void (^)(NSError *err))done;
 - (BOOL)clipBuffering;
@@ -223,4 +225,5 @@ BOOL FlideIsClone(void);
 + (BOOL)isOverlayWindow:(UIWindow *)w;
 + (UIView *)overlayRoot;     // интерактивный слой окон FLIDE
 + (void)rebuildAll;          // пересобрать окна (язык, вид)
++ (void)resetToBase;         // вернуть всё к исходному виду игры
 @end

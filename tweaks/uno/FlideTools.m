@@ -162,6 +162,15 @@
                      completion:^(BOOL f) { [v removeFromSuperview]; }];
     [self.stickers removeObject:v];
 }
+- (void)clearAll {
+    [self clearStickers];
+    [self.canvas clear];
+    [self.canvas removeFromSuperview];
+    self.canvas = nil;
+    [self.toolbar removeFromSuperview];
+    self.toolbar = nil;
+}
+
 - (void)clearStickers { for (UIView *v in self.stickers) [v removeFromSuperview]; [self.stickers removeAllObjects]; }
 
 #pragma mark скриншот

@@ -359,6 +359,52 @@ static NSArray<NSValue *> *allTextObjects(void) {
     return out;
 }
 
+// исходный текст игры — чтобы «вернуть всё к базе» могло его восстановить
+- (void)rememberOriginal:(NSString *)text forPath:(NSString *)path {
+    NSDictionary *orig = [FDefaults() dictionaryForKey:@"flide.texts.orig"];
+    if (orig[path] || [text hasPrefix:@"Игрок "] || [text hasPrefix:@"Player "]) return;
+    NSMutableDictionary *d = [orig mutableCopy] ?: [NSMutableDictionary new];
+    d[path] = text;
+    [FDefaults() setObject:d forKey:@"flide.texts.orig"];
+}
+
+- (void)resetEverything {
+    if (!FIL_Ready()) return;
+    // 1. тексты: вернуть исходные строки
+    NSDictionary *orig = [FDefaults() dictionaryForKey:@"flide.texts.orig"];
+    if (orig.count) {
+        NSMutableDictionary *targets = [NSMutableDictionary new];
+        [self refreshTargets:targets forPaths:orig.allKeys objects:allTextObjects()];
+        [orig enumerateKeysAndObjectsUsingBlock:^(NSString *path, NSString *text, BOOL *stop) {
+            for (NSNumber *h in targets[path]) {
+                void *o = FIL_Target(h.unsignedIntValue);
+                if (o) FIL_Call1(o, "set_text", FIL_NewString(text));
+            }
+        }];
+        for (NSArray *hs in targets.allValues) for (NSNumber *h in hs) FIL_Unpin(h.unsignedIntValue);
+    }
+    for (NSArray *hs in self.textTargets.allValues) for (NSNumber *h in hs) FIL_Unpin(h.unsignedIntValue);
+    [self.textTargets removeAllObjects];
+    for (NSString *k in @[kTexts, @"flide.texts.orig", kStreamerPaths, kStreamer]) [FDefaults() removeObjectForKey:k];
+
+    // 2. текстуры: паки, анимация, темы — выключить; оригиналы вернуть сразу
+    [[FlidePacks shared] cancelTheme];
+    NSString *anim = [[FlidePacks shared] animatedTexture];
+    [[FlidePacks shared] stopAnimation];
+    [[FlidePacks shared] deactivatePack];
+    NSDictionary *idx = [FDefaults() dictionaryForKey:kTextures];
+    if (idx.count || anim) {
+        NSArray *items = [self scanTextures];
+        for (FlideItem *it in items)
+            if (idx[it.name] || idx[FlideSafeName(it.name)] || [it.name isEqualToString:anim]) [self resetTexture:it];
+        [self releaseItems:items];
+    }
+    [FDefaults() removeObjectForKey:kTextures];
+    [NSFileManager.defaultManager removeItemAtPath:FlideDir(@"textures") error:nil];
+    [self.replacedIDs removeAllObjects];
+    self.seenTex = nil;
+}
+
 - (void)setOverride:(NSString *)text forPath:(NSString *)path {
     NSMutableDictionary *d = [[FDefaults() dictionaryForKey:kTexts] mutableCopy] ?: [NSMutableDictionary new];
     if (text.length) d[path] = text; else [d removeObjectForKey:path];
@@ -401,7 +447,10 @@ static NSArray<NSValue *> *allTextObjects(void) {
             if (!o) continue;
             NSString *want = masked ? [NSString stringWithFormat:L(@"Игрок %d"), player++] : text;
             NSString *cur = FIL_ToNSString(FIL_Call0(o, "get_text"));
-            if (cur && ![cur isEqualToString:want]) FIL_Call1(o, "set_text", FIL_NewString(want));
+            if (cur && ![cur isEqualToString:want]) {
+                [self rememberOriginal:cur forPath:path];
+                FIL_Call1(o, "set_text", FIL_NewString(want));
+            }
         }
     }];
 }

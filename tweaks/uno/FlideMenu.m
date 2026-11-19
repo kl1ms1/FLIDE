@@ -368,6 +368,8 @@ static NSString *screenOf(NSString *path) {
                 [FDefaults() setBool:YES forKey:@"flide.help.hidden"]; [ws reload];
             }],
         ] footer:nil]];
+    FRow *base = [FRow title:L(@"🧹 Вернуть всё к базе") sub:L(@"Игра снова как оригинал — сразу, без перезапуска") action:^(UIView *v) { [ws confirmBase]; }];
+    [S addObject:[FSection title:nil rows:@[base] footer:nil]];
     [S addObject:[FSection title:L(@"Чистота") rows:@[
         [FRow toggle:L(@"Без рекламы") sub:L(@"Межстраничная и баннеры. Нужен перезапуск") key:kNoAds],
     ] footer:L(@"Реклама за награду остаётся — смотришь, только если сам хочешь бонус.")]];
@@ -399,6 +401,19 @@ static NSString *screenOf(NSString *path) {
     }];
     reset.destructive = YES;
     [S addObject:[FSection title:nil rows:@[reset] footer:L(@"FLIDE · только визуал на твоём устройстве.")]];
+}
+
+- (void)confirmBase {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:L(@"Вернуть всё к базе?")
+        message:L(@"Текстуры, тексты, паки, ауры, ускорение, приколы и бут-лого вернутся к исходным. Язык и вид меню останутся.")
+        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Вернуть") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x) {
+        [FlideMenu resetToBase];
+        [self toast:L(@"Готово — всё как в оригинале ✦")];
+        [FlideMenu rebuildAll];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 
 #pragma mark Бут-лого
@@ -1472,6 +1487,21 @@ static UIWindow *gameWindow(void) {
 }
 + (void)release:(UIButton *)b {
     [UIView animateWithDuration:0.2 animations:^{ b.transform = CGAffineTransformIdentity; b.backgroundColor = UIColor.clearColor; }];
+}
+
++ (void)resetToBase {
+    [[FlideEngine shared] resetEverything];
+    // всё, что FLIDE добавлял сверху игры
+    for (NSString *k in @[kAuras, kHD, kFPS120, kFxStyle, kFxColor, kFxRandom, kFunSpeed, kFunRainbow, kFunTrail,
+                          kFunHaptic, kFunShake, kFunFPS, kFunNight, kFunConfetti, kFunParty, kFunClock, kFunShakeConfetti,
+                          kVictoryStyle, kVictoryText, kMyAvatar, kBootAnim, kBootSeconds, kPackActive])
+        [FDefaults() removeObjectForKey:k];
+    [FlideBoot setCustomImage:nil];
+    [[FlideFun shared] applySpeed];   // скорость → ×1
+    [[FlideFun shared] applyNight];
+    [[FlideFX shared] reloadRules];
+    [[FlideTools shared] clearAll];
+    if (FIL_Ready()) { int fps = -1; void *a[1] = { &fps }; FIL_Static("UnityEngine", "Application", "set_targetFrameRate", 1, a); }
 }
 
 + (void)rebuildAll {

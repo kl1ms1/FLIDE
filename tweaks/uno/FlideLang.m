@@ -315,6 +315,12 @@ NSString *FlideL(NSString *ru) {
     @"🛠 Настройки": @"🛠 Settings",
     @"🪩 Режим вечеринки": @"🪩 Party mode",
     @"🫧 Пузыри": @"🫧 Bubbles",
+    @"🧹 Вернуть всё к базе": @"🧹 Reset everything to base",
+    @"Игра снова как оригинал — сразу, без перезапуска": @"The game looks original again — instantly, no restart",
+    @"Вернуть всё к базе?": @"Reset everything to base?",
+    @"Текстуры, тексты, паки, ауры, ускорение, приколы и бут-лого вернутся к исходным. Язык и вид меню останутся.": @"Textures, texts, packs, auras, speed, fun stuff and boot logo go back to default. Menu language and look stay.",
+    @"Вернуть": @"Reset",
+    @"Готово — всё как в оригинале ✦": @"Done — everything is original ✦",
     };
     return en[ru] ?: ru;
 }
