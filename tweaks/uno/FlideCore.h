@@ -16,6 +16,8 @@
 #define kTexts      @"flide.texts"     // path -> string
 #define kAuras      @"flide.auras"     // path -> {style, color}
 #define kTextures   @"flide.textures"  // texture name -> file name
+#define kBoot       @"flide.boot"
+#define kBootSeconds @"flide.boot.seconds"
 
 static inline NSUserDefaults *FDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static inline BOOL FBool(NSString *k) { return [FDefaults() boolForKey:k]; }
@@ -74,6 +76,14 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (void)reloadRules;
 - (void)burstAt:(CGPoint)p big:(BOOL)big;
 - (void)cardThrownAt:(CGPoint)p;
+@end
+
+// ---------- бут-лого ----------
+@interface FlideBoot : NSObject
++ (void)install;
++ (void)showAnimated;
++ (BOOL)setCustomImage:(UIImage *)img;   // nil — вернуть стандартное
++ (BOOL)hasCustomImage;
 @end
 
 // ---------- меню ----------

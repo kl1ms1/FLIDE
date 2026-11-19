@@ -97,6 +97,7 @@ typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabFX };
 @property (nonatomic, strong) NSArray<FlideItem *> *items;
 @property (nonatomic, assign) BOOL pickingElement;
 @property (nonatomic, strong) FlideItem *pendingTexture;
+@property (nonatomic, assign) BOOL pickingBoot;
 @property (nonatomic, strong) NSMutableSet<NSNumber *> *previewQueue;
 @end
 
@@ -204,6 +205,19 @@ typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabFX };
         [S addObject:[FSection title:@"Чистота" rows:@[
             [FRow toggle:@"Без рекламы" sub:@"Межстраничная и баннеры. Нужен перезапуск" key:kNoAds],
         ] footer:@"Реклама за награду остаётся — смотришь, только если сам хочешь бонус."]];
+        NSMutableArray *boot = [NSMutableArray arrayWithObjects:
+            [FRow toggle:@"Бут-лого при запуске" sub:@"Анимированная заставка FLIDE" key:kBoot],
+            [FRow title:@"Своя картинка" sub:[FlideBoot hasCustomImage] ? @"Стоит своя ✓" : @"Сейчас стандартное ✦ FLIDE"
+                 action:^(UIView *v) { ws.pickingBoot = YES; [ws openPhotoPicker]; }],
+            [FRow title:@"Показать сейчас" sub:nil action:^(UIView *v) {
+                [ws close];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [FlideBoot showAnimated]; });
+            }], nil];
+        if ([FlideBoot hasCustomImage])
+            [boot insertObject:[FRow title:@"Вернуть стандартное" sub:nil action:^(UIView *v) {
+                [FlideBoot setCustomImage:nil]; [ws toast:@"Стандартное лого"]; [ws reload];
+            }] atIndex:2];
+        [S addObject:[FSection title:@"Бут-лого" rows:boot footer:@"Картинка с прозрачностью (PNG) смотрится лучше всего."]];
         [S addObject:[FSection title:@"Качество" rows:@[
             [FRow toggle:@"HD-текстуры" sub:@"Анизотропия 16×, трилинейная фильтрация, резче мипмапы" key:kHD],
             [FRow toggle:@"Макс. FPS" sub:@"До 120 Гц на ProMotion" key:kFPS120],
@@ -315,12 +329,8 @@ typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabFX };
     UIAlertController *a = [UIAlertController alertControllerWithTitle:it.name message:it.detail preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Заменить картинкой из Фото" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         self.pendingTexture = it;
-        PHPickerConfiguration *cfg = [PHPickerConfiguration new];
-        cfg.filter = [PHPickerFilter imagesFilter];
-        cfg.selectionLimit = 1;
-        PHPickerViewController *p = [[PHPickerViewController alloc] initWithConfiguration:cfg];
-        p.delegate = self;
-        [self presentViewController:p animated:YES completion:nil];
+        self.pickingBoot = NO;
+        [self openPhotoPicker];
     }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Сохранить PNG" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
         NSURL *u = [[FlideEngine shared] exportTexture:it];
@@ -338,9 +348,30 @@ typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabFX };
     [self presentViewController:a animated:YES completion:nil];
 }
 
+- (void)openPhotoPicker {
+    PHPickerConfiguration *cfg = [PHPickerConfiguration new];
+    cfg.filter = [PHPickerFilter imagesFilter];
+    cfg.selectionLimit = 1;
+    PHPickerViewController *p = [[PHPickerViewController alloc] initWithConfiguration:cfg];
+    p.delegate = self;
+    [self presentViewController:p animated:YES completion:nil];
+}
+
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
     [picker dismissViewControllerAnimated:YES completion:nil];
     NSItemProvider *p = results.firstObject.itemProvider;
+    if (self.pickingBoot) {
+        self.pickingBoot = NO;
+        if (![p canLoadObjectOfClass:UIImage.class]) return;
+        [p loadObjectOfClass:UIImage.class completionHandler:^(id<NSItemProviderReading> obj, NSError *err) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                BOOL ok = [obj isKindOfClass:UIImage.class] && [FlideBoot setCustomImage:(UIImage *)obj];
+                [self toast:ok ? @"Бут-лого обновлено ✦" : @"Не получилось"];
+                [self reload];
+            });
+        }];
+        return;
+    }
     FlideItem *target = self.pendingTexture;
     if (!p || !target || ![p canLoadObjectOfClass:UIImage.class]) return;
     [p loadObjectOfClass:UIImage.class completionHandler:^(id<NSItemProviderReading> obj, NSError *err) {

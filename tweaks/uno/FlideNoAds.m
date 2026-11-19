@@ -151,10 +151,11 @@ static void installHooks(void) {
 
 __attribute__((constructor))
 static void flideInit(void) {
-    [FDefaults() registerDefaults:@{ kNoAds: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF" }];
+    [FDefaults() registerDefaults:@{ kNoAds: @YES, kBoot: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF" }];
     installHooks();
     [[FlideEngine shared] start];
     [FlideMenu install];
+    [FlideBoot install];
     [[NSNotificationCenter defaultCenter] addObserverForName:NSBundleDidLoadNotification
         object:nil queue:nil usingBlock:^(NSNotification *n) { installHooks(); }];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
