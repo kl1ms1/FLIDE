@@ -227,7 +227,7 @@ static NSString *computePath(Il2CppObject *component) {
 
 NSString *FIL_Path(Il2CppObject *component) {
     CFTimeInterval now = CACurrentMediaTime();
-    if (!gPathCache || now - gPathCacheBorn > 30 || gPathCache.count > 6000) {
+    if (!gPathCache || now - gPathCacheBorn > 120 || gPathCache.count > 20000) {
         gPathCache = [NSMutableDictionary new];
         gPathCacheBorn = now;
     }

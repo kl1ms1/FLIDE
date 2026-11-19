@@ -9,7 +9,7 @@
 
 BOOL gFlideMenuVisible = NO;
 
-typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabFX, FTabFun, FTabEmotes, FTabPacks, FTabTools, FTabBoot, FTabSettings, FTabCount };
+typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabLayout, FTabFX, FTabFun, FTabEmotes, FTabPacks, FTabTools, FTabBoot, FTabSettings, FTabCount };
 
 static NSString *tabTitle(FTab t) {
     switch (t) {
@@ -23,9 +23,15 @@ static NSString *tabTitle(FTab t) {
         case FTabPacks:    return L(@"📦 Паки и темы");
         case FTabTools:    return L(@"📹 Стрим и скрины");
         case FTabSettings: return L(@"🛠 Настройки");
+        case FTabLayout:   return L(@"🧩 Интерфейс игры");
         default:           return @"";
     }
 }
+@interface FlideMenu (Private)
++ (NSArray<NSNumber *> *)tabOrder;
++ (void)editLayoutPath:(NSString *)path;
+@end
+
 static NSString *tabIcon(FTab t) { return [tabTitle(t) componentsSeparatedByString:@" "].firstObject; }
 static NSString *tabShort(FTab t) {
     switch (t) {
@@ -39,6 +45,7 @@ static NSString *tabShort(FTab t) {
         case FTabPacks:    return L(@"Паки");
         case FTabTools:    return L(@"Стрим");
         case FTabSettings: return L(@"Настройки");
+        case FTabLayout:   return L(@"Интерфейс");
         default:           return @"";
     }
 }
@@ -220,13 +227,7 @@ typedef void (^FPick)(FlideItem *item);
     self.items = items;
 }
 
-- (void)toast:(NSString *)msg {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:nil message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:a animated:YES completion:nil];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [a dismissViewControllerAnimated:YES completion:nil];
-    });
-}
+- (void)toast:(NSString *)msg { FlideToast(msg); }
 
 - (void)share:(NSArray *)things source:(UIView *)src {
     UIActivityViewController *a = [[UIActivityViewController alloc] initWithActivityItems:things applicationActivities:nil];
@@ -353,6 +354,7 @@ static NSString *screenOf(NSString *path) {
     case FTabPacks: [self buildPacks:S]; break;
     case FTabTools: [self buildTools:S]; break;
     case FTabSettings: [self buildSettings:S]; break;
+    case FTabLayout: [self buildLayout:S]; break;
     default: break;
     }
     self.sections = S;
@@ -818,7 +820,17 @@ static NSString *screenOf(NSString *path) {
             [ws ask:L(@"Надпись при победе") placeholder:L(@"Например: ИЗИ 😎") done:^(NSString *t) { [FDefaults() setObject:t forKey:kVictoryText]; [ws reload]; }];
         }],
         [FRow title:L(@"▶︎ Показать сейчас") sub:nil action:^(UIView *v) { [[FlideFun shared] victoryNow]; }],
-    ] footer:nil]];
+        [FRow title:L(@"🎓 Научить: выбрать экран победы") sub:[FDefaults() stringForKey:kVictoryPath] ? friendlyPath([FDefaults() stringForKey:kVictoryPath]) : L(@"Если не срабатывает само — открой экран результатов и выбери элемент на нём")
+             action:^(UIView *v) {
+            [ws startPicking:L(@"Выбери элемент экрана результатов") then:^(FlideItem *it) {
+                NSArray *c = [it.name componentsSeparatedByString:@"/"];
+                NSString *root = c.count > 2 ? [[c subarrayWithRange:NSMakeRange(0, 3)] componentsJoinedByString:@"/"] : it.name;
+                [FDefaults() setObject:root forKey:kVictoryPath];
+                [FDefaults() setBool:YES forKey:kFunConfetti];
+                [ws toast:L(@"Запомнил! Анимация будет при появлении этого экрана")];
+            }];
+        }],
+    ] footer:L(@"Срабатывает само, когда игра открывает окно результатов раунда.")]];
     NSDictionary *st = [[FlideFun shared] stats];
     int secs = [st[@"seconds"] intValue];
     [S addObject:[FSection title:L(@"📊 Статистика FLIDE") rows:@[
@@ -837,6 +849,9 @@ static NSString *screenOf(NSString *path) {
     __weak typeof(self) ws = self;
     FlideEmotes *E = [FlideEmotes shared];
     NSString *me = [FDefaults() stringForKey:kMyAvatar];
+    FRow *quick = [FRow toggle:L(@"😀 Быстрая кнопка на столе") sub:L(@"Эмоции и подарки в один тап прямо в игре") key:kQuickBar];
+    quick.changed = ^{ [[FlideQuick shared] refresh]; };
+    [S addObject:[FSection title:nil rows:@[quick] footer:L(@"Удержи эмоцию в быстрой панели, чтобы поставить свою. Подарок: выбери — и тапни по 🎯 над игроком.")]];
     [S addObject:[FSection title:nil rows:@[
         [FRow title:L(@"👤 Мой аватар") sub:me ? friendlyPath(me) : L(@"Не выбран — эмоции появятся внизу по центру") action:^(UIView *v) {
             [ws startPicking:L(@"Выбери свой аватар") then:^(FlideItem *it) { [FDefaults() setObject:it.name forKey:kMyAvatar]; }];
@@ -1082,6 +1097,59 @@ static NSString *screenOf(NSString *path) {
     ] footer:L(@"Стикер: тащи, щипком меняй размер, двумя пальцами крути, удержи — удалить.")]];
 }
 
+#pragma mark Интерфейс игры
+
+- (void)buildLayout:(NSMutableArray *)S {
+    __weak typeof(self) ws = self;
+    FlideLayout *Lay = [FlideLayout shared];
+    NSString *active = [Lay activePreset];
+    NSMutableArray *pre = [NSMutableArray new];
+    for (NSDictionary *p in [Lay presets]) {
+        BOOL on = [p[@"id"] isEqualToString:active];
+        FRow *r = [FRow title:[NSString stringWithFormat:@"%@%@", p[@"title"], on ? @"  ✓" : @""] sub:p[@"desc"] action:^(UIView *v) {
+            if (on) { [Lay resetAll]; [ws toast:L(@"Интерфейс как в оригинале")]; }
+            else { [Lay applyPreset:p[@"id"]]; [ws toast:L(@"Пресет интерфейса применён ✦")]; }
+            [ws reload];
+        }];
+        [pre addObject:r];
+    }
+    [S addObject:[FSection title:L(@"Готовые пресеты") rows:pre footer:L(@"Работают на игровом столе — зайди в матч. Нажми ещё раз, чтобы выключить.")]];
+
+    NSMutableArray *mine = [NSMutableArray new];
+    FRow *edit = [FRow title:L(@"Изменить элемент на экране") sub:L(@"Двигай, меняй размер, крути, прячь, оживляй анимацией") action:^(UIView *v) {
+        [ws startPicking:L(@"Выбери элемент интерфейса") then:^(FlideItem *it) { [FlideMenu editLayoutPath:it.name]; }];
+    }];
+    edit.icon = @"slider.horizontal.3";
+    [mine addObject:edit];
+    [[Lay rules] enumerateKeysAndObjectsUsingBlock:^(NSString *path, NSDictionary *rule, BOOL *stop) {
+        FRow *r = [FRow title:[path hasPrefix:@"*/"] ? [path substringFromIndex:2].lastPathComponent : path.lastPathComponent
+                          sub:friendlyPath([path hasPrefix:@"*/"] ? [path substringFromIndex:2] : path)
+                       action:^(UIView *v) { [FlideMenu editLayoutPath:path]; }];
+        r.icon = @"square.dashed";
+        [mine addObject:r];
+    }];
+    FRow *save = [FRow title:L(@"💾 Сохранить как свой пресет") sub:nil action:^(UIView *v) {
+        [ws ask:L(@"Название пресета") placeholder:L(@"Мой стол") done:^(NSString *t) { [Lay saveUserPreset:t]; [ws reload]; }];
+    }];
+    [mine addObject:save];
+    for (NSString *name in [[Lay userPresets].allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        FRow *r = [FRow title:[@"🗂 " stringByAppendingString:name] sub:nil action:^(UIView *v) {
+            [ws choose:name options:@[L(@"▶︎ Применить"), L(@"Удалить")] source:v done:^(NSInteger i) {
+                if (i == 0) { [Lay applyUserPreset:name]; [ws toast:L(@"Пресет интерфейса применён ✦")]; }
+                else [Lay deleteUserPreset:name];
+                [ws reload];
+            }];
+        }];
+        [mine addObject:r];
+    }
+    FRow *reset = [FRow title:L(@"↺ Вернуть интерфейс как было") sub:nil action:^(UIView *v) {
+        [Lay resetAll]; [ws toast:L(@"Интерфейс как в оригинале")]; [ws reload];
+    }];
+    reset.destructive = YES;
+    [mine addObject:reset];
+    [S addObject:[FSection title:L(@"Своя раскладка") rows:mine footer:L(@"Всё меняется только у тебя на экране. Совет: выбери элемент, затем «Родитель ↑», чтобы двигать целый блок.")]];
+}
+
 #pragma mark Настройки
 
 - (void)buildSettings:(NSMutableArray *)S {
@@ -1120,6 +1188,29 @@ static NSString *screenOf(NSString *path) {
     FRow *anim = [FRow toggle:L(@"Анимации меню") sub:L(@"Плавное появление окон") key:kUIAnim];
     anim.icon = @"sparkles";
     [S addObject:[FSection title:L(@"Вид") rows:@[g, sz, acc, labels, anim] footer:L(@"«Тёмное» не размывает фон — меньше нагрузка на телефон.")]];
+
+    NSMutableArray *order = [NSMutableArray new];
+    NSArray *hidden = [FDefaults() arrayForKey:kUIHidden] ?: @[];
+    for (NSNumber *t in [FlideMenu tabOrder]) {
+        BOOL hid = [hidden containsObject:t];
+        FRow *r = [FRow title:[NSString stringWithFormat:@"%@%@", L(tabTitle(t.integerValue)), hid ? L(@" · скрыта") : @""] sub:nil action:^(UIView *v) {
+            [ws choose:L(tabTitle(t.integerValue)) options:@[L(@"⬆︎ Выше"), L(@"⬇︎ Ниже"), hid ? L(@"👁 Показать") : L(@"🙈 Скрыть")] source:v done:^(NSInteger i) {
+                NSMutableArray *o = [[FlideMenu tabOrder] mutableCopy];
+                NSUInteger idx = [o indexOfObject:t];
+                if (i == 0 && idx > 0) [o exchangeObjectAtIndex:idx withObjectAtIndex:idx - 1];
+                if (i == 1 && idx + 1 < o.count) [o exchangeObjectAtIndex:idx withObjectAtIndex:idx + 1];
+                [FDefaults() setObject:o forKey:kUIOrder];
+                if (i == 2) {
+                    NSMutableArray *h = [[FDefaults() arrayForKey:kUIHidden] mutableCopy] ?: [NSMutableArray new];
+                    if (hid) [h removeObject:t]; else if (t.integerValue != FTabSettings) [h addObject:t];
+                    [FDefaults() setObject:h forKey:kUIHidden];
+                }
+                [FlideMenu rebuildAll];
+            }];
+        }];
+        [order addObject:r];
+    }
+    [S addObject:[FSection title:L(@"Панель FLIDE: порядок и видимость") rows:order footer:L(@"Нажми на окно — подвинь выше/ниже или спрячь иконку. «Настройки» спрятать нельзя.")]];
 
     FRow *help = [FRow title:L(@"Показать подсказку снова") sub:nil action:^(UIView *v) {
         [FDefaults() removeObjectForKey:@"flide.help.hidden"]; [ws toast:L(@"Подсказка — в окне «Главное»")];
@@ -1431,6 +1522,7 @@ static UIImage *roundedThumb(UIImage *img) {
 @property (nonatomic, assign) BOOL collapsed;
 @property (nonatomic, assign) CGFloat fullHeight;
 - (void)toFront;
+- (void)toggleCollapse;
 @end
 
 @interface FlideMenu ()
@@ -1551,6 +1643,183 @@ static UIImage *roundedThumb(UIImage *img) {
 
 @end
 
+#pragma mark - уведомление-«таблетка»
+
+void FlideToast(NSString *msg) {
+    UIView *root = [FlideMenu overlayRoot];
+    if (!root || !msg.length) return;
+    static UIView *last;
+    [last removeFromSuperview];
+    UIView *pill = FlideGlass(20);
+    UILabel *l = [UILabel new];
+    l.text = msg;
+    l.numberOfLines = 2;
+    l.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    l.textColor = UIColor.whiteColor;
+    l.textAlignment = NSTextAlignmentCenter;
+    CGSize sz = [l sizeThatFits:CGSizeMake(MIN(360, root.bounds.size.width - 60), 60)];
+    pill.frame = CGRectMake(0, 0, sz.width + 36, MAX(40, sz.height + 18));
+    l.frame = CGRectInset(pill.bounds, 18, 6);
+    UIView *c = [pill isKindOfClass:UIVisualEffectView.class] ? ((UIVisualEffectView *)pill).contentView : pill;
+    [c addSubview:l];
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(8, pill.bounds.size.height / 2 - 3, 6, 6)];
+    dot.backgroundColor = FlideAccent(); dot.layer.cornerRadius = 3;
+    [c addSubview:dot];
+    pill.center = CGPointMake(root.bounds.size.width / 2, root.bounds.size.height - root.safeAreaInsets.bottom - 50);
+    pill.layer.shadowColor = UIColor.blackColor.CGColor;
+    [root addSubview:pill];
+    last = pill;
+    pill.transform = CGAffineTransformConcat(CGAffineTransformMakeTranslation(0, 40), CGAffineTransformMakeScale(0.8, 0.8));
+    pill.alpha = 0;
+    [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.8 options:0 animations:^{
+        pill.transform = CGAffineTransformIdentity; pill.alpha = 1;
+    } completion:^(BOOL f) {
+        [UIView animateWithDuration:0.3 delay:1.6 options:0 animations:^{
+            pill.alpha = 0; pill.transform = CGAffineTransformMakeTranslation(0, 20);
+        } completion:^(BOOL f2) { [pill removeFromSuperview]; }];
+    }];
+}
+
+#pragma mark - редактор элемента интерфейса
+
+@interface FlideLayoutEditor : UIView
+@property (nonatomic, copy) NSString *path;
+@property (nonatomic, strong) NSMutableDictionary *rule;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, UILabel *> *values;
+@end
+
+@implementation FlideLayoutEditor
+
+- (instancetype)initWithPath:(NSString *)path {
+    if ((self = [super initWithFrame:CGRectMake(0, 0, 320, 372)])) {
+        _path = path;
+        _rule = [[[FlideLayout shared] ruleFor:path] mutableCopy];
+        _values = [NSMutableDictionary new];
+        UIView *g = FlideGlass(24);
+        g.frame = self.bounds;
+        [self addSubview:g];
+        UIView *c = [g isKindOfClass:UIVisualEffectView.class] ? ((UIVisualEffectView *)g).contentView : g;
+        self.layer.shadowColor = UIColor.blackColor.CGColor; self.layer.shadowOpacity = 0.4; self.layer.shadowRadius = 20;
+
+        UILabel *t = [[UILabel alloc] initWithFrame:CGRectMake(16, 10, 288, 22)];
+        NSString *shown = [path hasPrefix:@"*/"] ? [path substringFromIndex:2] : path;
+        t.text = [@"🧩 " stringByAppendingString:shown.lastPathComponent];
+        t.font = [UIFont systemFontOfSize:16 weight:UIFontWeightHeavy];
+        t.textColor = UIColor.whiteColor;
+        [c addSubview:t];
+        [t addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)]];
+        t.userInteractionEnabled = YES;
+
+        CGFloat y = 40;
+        y = [self slider:L(@"Влево / вправо") key:@"dx" min:-400 max:400 def:0 y:y in:c];
+        y = [self slider:L(@"Вниз / вверх") key:@"dy" min:-300 max:300 def:0 y:y in:c];
+        y = [self slider:L(@"Размер") key:@"s" min:0.3 max:2.5 def:1 y:y in:c];
+        y = [self slider:L(@"Поворот") key:@"r" min:-180 max:180 def:0 y:y in:c];
+
+        NSArray *anims = @[L(@"Нет"), L(@"Пульс"), L(@"Качание"), L(@"Маятник"), L(@"Вращение"), L(@"Дрожь")];
+        UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:anims];
+        seg.frame = CGRectMake(12, y + 4, 296, 30);
+        seg.selectedSegmentIndex = [self.rule[@"anim"] integerValue];
+        seg.selectedSegmentTintColor = FlideAccent();
+        [seg setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold]} forState:UIControlStateNormal];
+        [seg addTarget:self action:@selector(anim:) forControlEvents:UIControlEventValueChanged];
+        [c addSubview:seg];
+        y += 44;
+
+        UIStackView *row = [[UIStackView alloc] initWithFrame:CGRectMake(12, y, 296, 38)];
+        row.distribution = UIStackViewDistributionFillEqually;
+        row.spacing = 6;
+        [row addArrangedSubview:[self button:[self.rule[@"hide"] boolValue] ? L(@"👁 Показать") : L(@"🙈 Спрятать") action:@selector(hide:)]];
+        [row addArrangedSubview:[self button:L(@"Родитель ↑") action:@selector(parent)]];
+        [c addSubview:row];
+        y += 44;
+        UIStackView *row2 = [[UIStackView alloc] initWithFrame:CGRectMake(12, y, 296, 38)];
+        row2.distribution = UIStackViewDistributionFillEqually;
+        row2.spacing = 6;
+        [row2 addArrangedSubview:[self button:L(@"↺ Сброс") action:@selector(reset)]];
+        UIButton *done = [self button:L(@"✓ Готово") action:@selector(done)];
+        done.backgroundColor = FlideAccent();
+        [row2 addArrangedSubview:done];
+        [c addSubview:row2];
+    }
+    return self;
+}
+
+- (UIButton *)button:(NSString *)title action:(SEL)sel {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    [b setTitle:title forState:UIControlStateNormal];
+    b.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    b.tintColor = UIColor.whiteColor;
+    b.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+    b.layer.cornerRadius = 12;
+    [b addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
+    return b;
+}
+
+- (CGFloat)slider:(NSString *)title key:(NSString *)key min:(float)mn max:(float)mx def:(float)d y:(CGFloat)y in:(UIView *)c {
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(16, y, 200, 16)];
+    l.text = title;
+    l.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    l.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+    [c addSubview:l];
+    UILabel *v = [[UILabel alloc] initWithFrame:CGRectMake(220, y, 84, 16)];
+    v.textAlignment = NSTextAlignmentRight;
+    v.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightBold];
+    v.textColor = FlideAccent();
+    [c addSubview:v];
+    self.values[key] = v;
+    UISlider *s = [[UISlider alloc] initWithFrame:CGRectMake(12, y + 16, 296, 28)];
+    s.minimumValue = mn; s.maximumValue = mx;
+    s.value = self.rule[key] ? [self.rule[key] floatValue] : d;
+    s.tintColor = FlideAccent();
+    objc_setAssociatedObject(s, "key", key, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [s addTarget:self action:@selector(slid:) forControlEvents:UIControlEventValueChanged];
+    [c addSubview:s];
+    v.text = [NSString stringWithFormat:[key isEqualToString:@"s"] ? @"×%.2f" : @"%.0f", s.value];
+    return y + 48;
+}
+
+- (void)push { [[FlideLayout shared] setRule:self.rule forPath:self.path]; }
+
+- (void)slid:(UISlider *)s {
+    NSString *k = objc_getAssociatedObject(s, "key");
+    self.rule[k] = @(s.value);
+    self.values[k].text = [NSString stringWithFormat:[k isEqualToString:@"s"] ? @"×%.2f" : @"%.0f", s.value];
+    [self push];
+}
+- (void)anim:(UISegmentedControl *)s { self.rule[@"anim"] = @(s.selectedSegmentIndex); [self push]; }
+- (void)hide:(UIButton *)b {
+    BOOL h = ![self.rule[@"hide"] boolValue];
+    self.rule[@"hide"] = @(h);
+    [b setTitle:h ? L(@"👁 Показать") : L(@"🙈 Спрятать") forState:UIControlStateNormal];
+    [self push];
+}
+- (void)parent {
+    NSString *p = [self.path hasPrefix:@"*/"] ? [self.path substringFromIndex:2] : self.path;
+    if (![p containsString:@"/"]) return;
+    NSString *up = [p stringByDeletingLastPathComponent];
+    if (!self.rule.count) [[FlideLayout shared] setRule:nil forPath:self.path];
+    UIView *sup = self.superview;
+    CGPoint c = self.center;
+    [self removeFromSuperview];
+    FlideLayoutEditor *e = [[FlideLayoutEditor alloc] initWithPath:[self.path hasPrefix:@"*/"] ? [@"*/" stringByAppendingString:up] : up];
+    e.center = c;
+    [sup addSubview:e];
+    FlideToast([NSString stringWithFormat:L(@"Теперь двигаешь: %@"), up.lastPathComponent]);
+}
+- (void)reset {
+    [[FlideLayout shared] setRule:nil forPath:self.path];
+    [self removeFromSuperview];
+    FlideToast(L(@"Элемент вернулся на место"));
+}
+- (void)done { [self removeFromSuperview]; }
+- (void)drag:(UIPanGestureRecognizer *)g {
+    CGPoint t = [g translationInView:self.superview];
+    self.center = CGPointMake(self.center.x + t.x, self.center.y + t.y);
+    [g setTranslation:CGPointZero inView:self.superview];
+}
+@end
+
 #pragma mark - панель запуска и управление окнами
 
 @implementation FlideMenu
@@ -1560,6 +1829,27 @@ static UIView *gLauncher;
 static NSMutableArray<FlidePanel *> *gPanels;
 
 + (BOOL)isOverlayWindow:(UIWindow *)w { return [w isKindOfClass:FlideOverlayWindow.class]; }
+
++ (NSArray<NSNumber *> *)tabOrder {
+    NSMutableArray *o = [[FDefaults() arrayForKey:kUIOrder] mutableCopy] ?: [NSMutableArray new];
+    for (NSInteger t = 0; t < FTabCount; t++) if (![o containsObject:@(t)]) [o addObject:@(t)];
+    [o filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSNumber *n, id b) { return n.integerValue < FTabCount; }]];
+    return o;
+}
+
++ (void)editLayoutPath:(NSString *)path {
+    UIView *root = [self overlayRoot];
+    for (UIView *v in root.subviews) if ([v isKindOfClass:FlideLayoutEditor.class]) [v removeFromSuperview];
+    FlideLayoutEditor *e = [[FlideLayoutEditor alloc] initWithPath:path];
+    e.center = CGPointMake(root.bounds.size.width - 180, root.bounds.size.height / 2);
+    [root addSubview:e];
+    e.alpha = 0; e.transform = CGAffineTransformMakeScale(0.85, 0.85);
+    [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.7 initialSpringVelocity:0.6 options:0 animations:^{
+        e.alpha = 1; e.transform = CGAffineTransformIdentity;
+    } completion:nil];
+    // окна FLIDE сворачиваем, чтобы было видно стол
+    for (FlidePanel *p in gPanels) if (!p.collapsed) [p toggleCollapse];
+}
 + (UIView *)overlayRoot { [self ensureOverlay]; return gOverlay.rootViewController.view; }
 
 static UIWindow *gameWindow(void) {
@@ -1620,7 +1910,13 @@ static UIWindow *gameWindow(void) {
     logo.textAlignment = NSTextAlignmentCenter;
     [st addArrangedSubview:logo];
 
-    for (NSInteger tab = 0; tab < FTabCount; tab++) {
+    NSArray *hiddenTabs = [FDefaults() arrayForKey:kUIHidden] ?: @[];
+    NSArray *ordered = [self tabOrder];
+    NSUInteger shown = 0;
+    for (NSNumber *tabN in ordered) {
+        NSInteger tab = tabN.integerValue;
+        if ([hiddenTabs containsObject:tabN]) continue;
+        shown++;
         UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
         b.tag = tab;
         [b.widthAnchor constraintEqualToConstant:itemW].active = YES;
@@ -1657,7 +1953,7 @@ static UIWindow *gameWindow(void) {
     [x addTarget:self action:@selector(hideLauncher) forControlEvents:UIControlEventTouchUpInside];
     [st addArrangedSubview:x];
 
-    CGFloat w = 84 + FTabCount * (itemW + 2) + 40 + 20;
+    CGFloat w = 84 + shown * (itemW + 2) + 40 + 20;
     CGFloat maxW = root.bounds.size.width - 24;
     UIScrollView *sc = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, MIN(w, maxW), barH)];
     sc.showsHorizontalScrollIndicator = NO;
@@ -1671,6 +1967,13 @@ static UIWindow *gameWindow(void) {
     [root addSubview:bar];
     gLauncher = bar;
     if (animated && ([FDefaults() objectForKey:kUIAnim] ? FBool(kUIAnim) : YES)) {
+        NSUInteger k = 0;
+        for (UIView *v in st.arrangedSubviews) { // иконки «падают» волной
+            v.transform = CGAffineTransformMakeTranslation(0, -30); v.alpha = 0;
+            [UIView animateWithDuration:0.5 delay:0.08 + 0.03 * k++ usingSpringWithDamping:0.5 initialSpringVelocity:0.8 options:0 animations:^{
+                v.transform = CGAffineTransformIdentity; v.alpha = 1;
+            } completion:nil];
+        }
         bar.transform = CGAffineTransformMakeTranslation(0, -90);
         [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.7 initialSpringVelocity:0.5 options:0 animations:^{
             bar.transform = CGAffineTransformIdentity;
@@ -1691,6 +1994,7 @@ static UIWindow *gameWindow(void) {
 
 + (void)resetToBase {
     [[FlideEngine shared] resetEverything];
+    [[FlideLayout shared] resetAll];
     // всё, что FLIDE добавлял сверху игры
     for (NSString *k in @[kAuras, kHD, kFPS120, kFxStyle, kFxColor, kFxRandom, kFunSpeed, kFunRainbow, kFunTrail,
                           kFunHaptic, kFunShake, kFunFPS, kFunNight, kFunConfetti, kFunParty, kFunClock, kFunShakeConfetti,
@@ -1812,6 +2116,7 @@ static UIWindow *gameWindow(void) {
         [self attach];
         [[FlideFX shared] start];
         [self ensureOverlay];
+        [[FlideQuick shared] refresh];
     }];
 }
 

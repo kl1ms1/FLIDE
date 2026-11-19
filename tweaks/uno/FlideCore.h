@@ -46,6 +46,10 @@
 #define kUIScale      @"flide.ui.scale"      // 0 компактно, 1 обычно, 2 крупно
 #define kUILabels     @"flide.ui.labels"     // подписи в панели запуска
 #define kUIAnim       @"flide.ui.anim"
+#define kUIOrder      @"flide.ui.order"      // порядок иконок панели
+#define kUIHidden     @"flide.ui.hidden"     // скрытые иконки
+#define kQuickBar     @"flide.quick"         // быстрая кнопка эмоций на столе
+#define kVictoryPath  @"flide.victory.path"  // элемент экрана победы, выбранный вручную
 
 static inline NSUserDefaults *FDefaults(void) { return NSUserDefaults.standardUserDefaults; }
 static inline BOOL FBool(NSString *k) { return [FDefaults() boolForKey:k]; }
@@ -196,6 +200,34 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (BOOL)addCustomGift:(UIImage *)img;
 - (void)removeCustomGift:(NSString *)path;
 - (void)sendGift:(id)gift toPoint:(NSValue *)target;  // nil — себе
+- (NSArray *)slots;                                    // 8 слотов быстрой панели
+- (void)setSlot:(NSUInteger)i to:(id)thing;
+- (NSString *)slotFromImage:(UIImage *)img;
+- (CGPoint)myPoint;
+- (NSArray<NSValue *> *)opponentPoints;
+@end
+
+// ---------- быстрая панель эмоций/подарков на столе ----------
+@interface FlideQuick : NSObject
++ (instancetype)shared;
+- (void)refresh;
+@end
+
+// ---------- редактор интерфейса игры ----------
+@interface FlideLayout : NSObject
++ (instancetype)shared;
+- (void)start;
+- (NSDictionary *)rules;
+- (NSDictionary *)ruleFor:(NSString *)path;
+- (void)setRule:(NSDictionary *)rule forPath:(NSString *)path;
+- (void)resetAll;
+- (NSArray<NSDictionary *> *)presets;
+- (NSString *)activePreset;
+- (void)applyPreset:(NSString *)pid;
+- (NSDictionary *)userPresets;
+- (void)saveUserPreset:(NSString *)name;
+- (void)applyUserPreset:(NSString *)name;
+- (void)deleteUserPreset:(NSString *)name;
 @end
 
 // ---------- инструменты ----------
@@ -245,3 +277,5 @@ BOOL FlideIsClone(void);
 + (void)rebuildAll;          // пересобрать окна (язык, вид)
 + (void)resetToBase;         // вернуть всё к исходному виду игры
 @end
+
+void FlideToast(NSString *msg);  // стеклянное уведомление поверх всего

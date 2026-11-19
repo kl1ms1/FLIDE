@@ -33,7 +33,7 @@
     self.lastSpeed = 1;
     [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) { [self secondTick]; }];
     [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(NSTimer *t) { [self rainbowTick]; }];
-    [NSTimer scheduledTimerWithTimeInterval:3.0 repeats:YES block:^(NSTimer *t) { [self victoryTick]; }];
+    [NSTimer scheduledTimerWithTimeInterval:1.5 repeats:YES block:^(NSTimer *t) { [self victoryTick]; }];
     [NSTimer scheduledTimerWithTimeInterval:30.0 repeats:YES block:^(NSTimer *t) { [self flushStats]; }];
     self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(frame)];
     self.link.paused = YES; // счётчик FPS работает, только когда включён
@@ -226,18 +226,21 @@ static NSMutableDictionary *gStats;
 
 #pragma mark - победа
 
+// Конец раунда: игра открывает окно результатов. Имена взяты из файлов игры:
+// GameScoringWnd, StatisticCalcCardScoreWnd, CoinsLeagueSettlementWnd, WinGoldCoolWnd, …
 - (BOOL)victoryVisible {
-    static NSArray *words;
-    if (!words) words = @[@"win", @"victory", @"winner", @"побед", @"выигр", @"1st"];
-    NSMutableArray *objs = [NSMutableArray new];
-    if (FIL_Class("TMPro", "TMP_Text")) [objs addObjectsFromArray:FIL_FindAll("TMPro", "TMP_Text")];
-    else [objs addObjectsFromArray:FIL_FindAll("TMPro", "TextMeshProUGUI")];
-    [objs addObjectsFromArray:FIL_FindAll("UnityEngine.UI", "Text")];
-    for (NSValue *v in objs) {
-        NSString *t = FIL_ToNSString(FIL_Call0(v.pointerValue, "get_text")).lowercaseString;
-        if (t.length == 0 || t.length > 40) continue;
-        for (NSString *w in words)
-            if ([t containsString:w] && FIL_ActiveInHierarchy(v.pointerValue)) return YES;
+    static NSArray *wnds;
+    if (!wnds) wnds = @[@"gamescoringwnd", @"statisticcalccardscore", @"settlement", @"wingoldcool",
+                        @"calcscore", @"calscore", @"gamewin", @"richmanroundfinish", @"wtagamescore"];
+    NSString *taught = [FDefaults() stringForKey:kVictoryPath];
+    for (NSValue *v in FIL_FindAll("UnityEngine.UI", "Graphic")) {
+        NSString *p = FIL_Path(v.pointerValue);
+        BOOL hit = taught ? [p hasPrefix:taught] : NO;
+        if (!hit) {
+            NSString *low = p.lowercaseString;
+            for (NSString *w in wnds) if ([low containsString:w]) { hit = YES; break; }
+        }
+        if (hit && FIL_ActiveInHierarchy(v.pointerValue)) return YES;
     }
     return NO;
 }

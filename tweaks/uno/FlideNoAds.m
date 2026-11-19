@@ -151,7 +151,7 @@ static void installHooks(void) {
 
 __attribute__((constructor))
 static void flideInit(void) {
-    [FDefaults() registerDefaults:@{ kNoAds: @YES, kBoot: @YES, kSpoof: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF", kUILabels: @YES, kUIAnim: @YES, kUIScale: @1 }];
+    [FDefaults() registerDefaults:@{ kNoAds: @YES, kBoot: @YES, kSpoof: @YES, kFxTouch: @YES, kFxCombo: @YES, kFxColor: @"#7CF7FF", kUILabels: @YES, kUIAnim: @YES, kUIScale: @1, kFunConfetti: @YES, kQuickBar: @YES }];
     FlideGuardCheckOnLaunch(); // если прошлый запуск упал — отключим виновника
     FlideCloneInstall();   // первым делом, до SDK
     installHooks();
@@ -160,6 +160,7 @@ static void flideInit(void) {
     [FlideBoot install];
     [[FlidePacks shared] start];
     [[FlideFun shared] start];
+    [[FlideLayout shared] start];
     [[NSNotificationCenter defaultCenter] addObserverForName:NSBundleDidLoadNotification
         object:nil queue:nil usingBlock:^(NSNotification *n) { installHooks(); }];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
