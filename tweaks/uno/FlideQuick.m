@@ -94,7 +94,7 @@ static NSString *const kQuickPos = @"flide.quick.pos";
         [b setTitle:thing[@"icon"] forState:UIControlStateNormal];
         b.titleLabel.font = [UIFont systemFontOfSize:s * 0.55];
     } else if ([thing isKindOfClass:NSString.class] && [thing hasPrefix:@"/"]) {
-        UIImageView *iv = [[UIImageView alloc] initWithImage:[UIImage imageWithContentsOfFile:thing]];
+        UIImageView *iv = [[UIImageView alloc] initWithImage:FlideLoadImage(thing, 96)];
         iv.frame = CGRectInset(b.bounds, 6, 6);
         iv.contentMode = UIViewContentModeScaleAspectFit;
         iv.userInteractionEnabled = NO;
@@ -116,7 +116,7 @@ static NSString *const kQuickPos = @"flide.quick.pos";
     p.frame = CGRectMake(x, y, W, H);
     UIView *content = [p isKindOfClass:UIVisualEffectView.class] ? ((UIVisualEffectView *)p).contentView : p;
 
-    UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[L(@"😀 Эмоции"), L(@"🎁 Подарки")]];
+    UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[L(@"😀 Эмоции"), L(@"🎁 Подарки"), L(@"🏷 Стикеры")]];
     seg.frame = CGRectMake(12, 10, W - 24, 30);
     seg.selectedSegmentIndex = self.tab;
     seg.selectedSegmentTintColor = FlideAccent();
@@ -153,7 +153,13 @@ static NSString *const kQuickPos = @"flide.quick.pos";
     for (UIView *v in grid.subviews) [v removeFromSuperview];
     FlideEmotes *E = [FlideEmotes shared];
     NSArray *things;
-    if (self.tab == 0) {
+    if (self.tab == 2) {
+        NSString *pack = [self stickerPack];
+        NSMutableArray *st = [NSMutableArray arrayWithObject:@"__pack__"];
+        if (pack) [st addObjectsFromArray:[[FlideStickers shared] filesInPack:pack]];
+        things = st;
+        hint.text = pack ? [NSString stringWithFormat:L(@"Пак: %@ · тап — отправить"), pack] : L(@"Создай пак в окне «😀 Эмоции и подарки»");
+    } else if (self.tab == 0) {
         things = [E slots];
         hint.text = L(@"🔒 Видишь только ты · удержи — поменять эмоцию");
     } else {
@@ -165,7 +171,8 @@ static NSString *const kQuickPos = @"flide.quick.pos";
     CGFloat s = 60, gap = 10, x0 = 15;
     NSInteger cols = 4;
     for (NSUInteger i = 0; i < things.count; i++) {
-        UIButton *b = [self cell:things[i] size:s];
+        id thing = [things[i] isEqual:@"__pack__"] ? @"📦" : things[i];
+        UIButton *b = [self cell:thing size:s];
         b.center = CGPointMake(x0 + s / 2 + (i % cols) * (s + gap), 6 + s / 2 + (i / cols) * (s + gap));
         b.tag = 100 + i;
         [b addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -185,6 +192,14 @@ static NSString *const kQuickPos = @"flide.quick.pos";
     [UIView animateWithDuration:0.1 animations:^{ b.transform = CGAffineTransformMakeScale(0.82, 0.82); }
                      completion:^(BOOL f) { [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.4 initialSpringVelocity:1 options:0 animations:^{ b.transform = CGAffineTransformIdentity; } completion:nil]; }];
     FlideEmotes *E = [FlideEmotes shared];
+    if (self.tab == 2) {
+        if (i == 0) { [self choosePack]; return; }
+        NSString *pack = [self stickerPack];
+        NSArray *files = pack ? [[FlideStickers shared] filesInPack:pack] : @[];
+        if (i - 1 < (NSInteger)files.count) [E sendEmote:files[i - 1]];
+        [self closePanel];
+        return;
+    }
     if (self.tab == 0) {
         NSArray *slots = [E slots];
         if (i < (NSInteger)slots.count) [E sendEmote:slots[i]];
@@ -194,6 +209,29 @@ static NSString *const kQuickPos = @"flide.quick.pos";
     NSMutableArray *g = [NSMutableArray arrayWithArray:[E builtinGifts]];
     [g addObjectsFromArray:[E customGifts]];
     if (i < (NSInteger)g.count) [self showTargetsFor:g[i]];
+}
+
+#pragma mark - стикеры
+
+- (NSString *)stickerPack {
+    NSArray *packs = [[FlideStickers shared] packs];
+    NSString *cur = [FDefaults() stringForKey:kStickerPack];
+    return [packs containsObject:cur] ? cur : packs.firstObject;
+}
+
+- (void)choosePack {
+    NSArray *packs = [[FlideStickers shared] packs];
+    if (!packs.count) { FlideToast(L(@"Создай пак в окне «😀 Эмоции и подарки»")); return; }
+    UIViewController *host = [FlideMenu overlayRoot].window.rootViewController;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:L(@"Стикер-пак") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *p in packs)
+        [a addAction:[UIAlertAction actionWithTitle:p style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+            [FDefaults() setObject:p forKey:kStickerPack]; [self fillGrid];
+        }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:nil]];
+    a.popoverPresentationController.sourceView = self.panel;
+    a.popoverPresentationController.sourceRect = self.panel.bounds;
+    [host presentViewController:a animated:YES completion:nil];
 }
 
 #pragma mark - цели для подарка

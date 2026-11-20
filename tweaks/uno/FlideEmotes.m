@@ -152,7 +152,7 @@ static UIImage *emojiImage(NSString *e, CGFloat size) {
 
 static UIImage *imageFor(id thing, CGFloat size) {
     if ([thing isKindOfClass:NSString.class] && [(NSString *)thing hasPrefix:@"/"])
-        return [UIImage imageWithContentsOfFile:thing];
+        return FlideLoadImage(thing, size);
     if ([thing isKindOfClass:NSDictionary.class]) return emojiImage(thing[@"icon"], size);
     if ([thing isKindOfClass:NSString.class]) return emojiImage(thing, size);
     return nil;
@@ -189,6 +189,7 @@ static UIImage *imageFor(id thing, CGFloat size) {
     UIView *h = [self host];
     UIImage *img = imageFor(emote, 140);
     if (!h || !img) return;
+    [[FlideSound shared] play:@"emote"];
     CGPoint me = [self myPoint];
     BOOL right = me.x < h.bounds.size.width / 2;
     UIView *b = [self bubbleWith:img tailLeft:right];
@@ -286,6 +287,7 @@ static UIImage *imageFor(id thing, CGFloat size) {
     UIView *h = [self host];
     UIImage *img = imageFor(gift, 160);
     if (!h || !img) return;
+    [[FlideSound shared] play:@"gift"];
     CGPoint from = [self myPoint];
     CGPoint to = target ? target.CGPointValue : CGPointMake(from.x, from.y - 1);
     BOOL toSelf = !target;

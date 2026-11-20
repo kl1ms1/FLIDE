@@ -259,6 +259,7 @@ static NSMutableDictionary *gStats;
     NSString *text = [FDefaults() stringForKey:kVictoryText];
     if (text.length) [self bigText:text];
     if (FBool(kFunHaptic)) [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeSuccess];
+    [[FlideSound shared] play:@"victory"];
 }
 
 - (void)bigText:(NSString *)text {

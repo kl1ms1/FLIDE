@@ -9,7 +9,7 @@
 
 BOOL gFlideMenuVisible = NO;
 
-typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabLayout, FTabFX, FTabFun, FTabEmotes, FTabPacks, FTabTools, FTabBoot, FTabSettings, FTabCount };
+typedef NS_ENUM(NSInteger, FTab) { FTabMain, FTabTextures, FTabTexts, FTabLayout, FTabFX, FTabFun, FTabEmotes, FTabPacks, FTabTools, FTabBoot, FTabSettings, FTabSounds, FTabCount };
 
 static NSString *tabTitle(FTab t) {
     switch (t) {
@@ -24,6 +24,7 @@ static NSString *tabTitle(FTab t) {
         case FTabTools:    return L(@"📹 Стрим и скрины");
         case FTabSettings: return L(@"🛠 Настройки");
         case FTabLayout:   return L(@"🧩 Интерфейс игры");
+        case FTabSounds:   return L(@"🔊 Звуки");
         default:           return @"";
     }
 }
@@ -51,6 +52,7 @@ static NSString *tabShort(FTab t) {
         case FTabTools:    return L(@"Стрим");
         case FTabSettings: return L(@"Настройки");
         case FTabLayout:   return L(@"Интерфейс");
+        case FTabSounds:   return L(@"Звуки");
         default:           return @"";
     }
 }
@@ -186,6 +188,7 @@ typedef void (^FPick)(FlideItem *item);
 @property (nonatomic, assign) BOOL selecting;               // режим «выбрать несколько»
 @property (nonatomic, strong) NSMutableSet<NSString *> *selected;  // имена текстур
 @property (nonatomic, copy) void (^filesHandler)(NSArray<NSURL *> *urls);
+@property (nonatomic, copy) NSString *stickerPackTarget;   // пак, в который грузим стикеры из Фото
 @property (nonatomic, copy) NSString *openPreset;           // открытый для просмотра пресет
 @end
 
@@ -276,6 +279,16 @@ typedef void (^FPick)(FlideItem *item);
 
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
     [picker dismissViewControllerAnimated:YES completion:nil];
+    if (self.stickerPackTarget) {
+        NSString *pack = self.stickerPackTarget;
+        self.stickerPackTarget = nil;
+        if (!results.count) return;
+        [[FlideStickers shared] importPickerResults:results intoPack:pack completion:^(NSUInteger n) {
+            [self toast:[NSString stringWithFormat:L(@"Добавлено стикеров: %lu"), (unsigned long)n]];
+            [self reload];
+        }];
+        return;
+    }
     NSItemProvider *p = results.firstObject.itemProvider;
     void (^h)(UIImage *) = self.photoHandler;
     self.photoHandler = nil;
@@ -360,6 +373,7 @@ static NSString *screenOf(NSString *path) {
     case FTabTools: [self buildTools:S]; break;
     case FTabSettings: [self buildSettings:S]; break;
     case FTabLayout: [self buildLayout:S]; break;
+    case FTabSounds: [self buildSounds:S]; break;
     default: break;
     }
     self.sections = S;
@@ -897,6 +911,43 @@ static NSString *screenOf(NSString *path) {
             [ws pickPhoto:^(UIImage *img) { [E addCustomGift:img]; [ws reload]; }];
         }],
     ] footer:L(@"Наши собственные анимации — бесплатно и только у тебя на экране.")]];
+
+    FlideStickers *St = [FlideStickers shared];
+    NSString *activePack = [FDefaults() stringForKey:kStickerPack];
+    NSMutableArray *packRows = [NSMutableArray new];
+    for (NSString *pack in [St packs]) {
+        NSUInteger n = [St filesInPack:pack].count;
+        FRow *r = [FRow title:[NSString stringWithFormat:@"%@%@", pack, [pack isEqualToString:activePack] ? @"  ✓" : @""]
+                          sub:[NSString stringWithFormat:L(@"Стикеров: %lu"), (unsigned long)n] action:^(UIView *v) {
+            NSArray *opts = @[L(@"＋ Добавить из Фото (GIF тоже)"), L(@"＋ Добавить из «Файлов»"), L(@"✓ Сделать активным"), L(@"Удалить пак")];
+            [ws choose:pack options:opts source:v done:^(NSInteger i) {
+                if (i == 0) { [ws pickStickersFromPhotos:pack]; return; }
+                if (i == 1) {
+                    [ws pickFilesOfTypes:@[UTTypeImage, UTTypeFolder] then:^(NSArray<NSURL *> *urls) {
+                        [ws toast:[NSString stringWithFormat:L(@"Добавлено стикеров: %lu"), (unsigned long)[[FlideStickers shared] importURLs:urls intoPack:pack]]];
+                        [ws reload];
+                    } multiple:YES];
+                    return;
+                }
+                if (i == 2) [FDefaults() setObject:pack forKey:kStickerPack];
+                if (i == 3) [[FlideStickers shared] deletePack:pack];
+                [ws reload];
+            }];
+        }];
+        r.icon = @"face.smiling";
+        [packRows addObject:r];
+    }
+    FRow *newPack = [FRow title:L(@"＋ Новый стикер-пак") sub:nil action:^(UIView *v) {
+        [ws ask:L(@"Название пака") placeholder:L(@"Мои стикеры") done:^(NSString *t) {
+            NSString *pk = [[FlideStickers shared] createPack:t];
+            [FDefaults() setObject:pk forKey:kStickerPack];
+            [ws reload];
+        }];
+    }];
+    newPack.icon = @"plus.circle";
+    [packRows addObject:newPack];
+    [S addObject:[FSection title:L(@"🏷 Стикер-паки") rows:packRows
+                          footer:L(@"GIF играет как анимация. Стикеры из пака — во вкладке «🏷 Стикеры» быстрой кнопки 😀 на столе.")]];
 }
 
 #pragma mark Паки и темы
@@ -1030,6 +1081,7 @@ static NSString *screenOf(NSString *path) {
 }
 
 - (void)importPack {
+    self.filesHandler = nil;
     UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
         initForOpeningContentTypes:@[UTTypeFolder, UTTypePNG] asCopy:NO];
     p.allowsMultipleSelection = YES;
@@ -1153,6 +1205,73 @@ static NSString *screenOf(NSString *path) {
     reset.destructive = YES;
     [mine addObject:reset];
     [S addObject:[FSection title:L(@"Своя раскладка") rows:mine footer:L(@"Всё меняется только у тебя на экране. Совет: выбери элемент, затем «Родитель ↑», чтобы двигать целый блок.")]];
+}
+
+#pragma mark Звуки
+
+- (void)pickStickersFromPhotos:(NSString *)pack {
+    self.stickerPackTarget = pack;
+    self.photoHandler = nil;
+    PHPickerConfiguration *cfg = [PHPickerConfiguration new];
+    cfg.filter = [PHPickerFilter imagesFilter];
+    cfg.selectionLimit = 30;
+    cfg.selection = PHPickerConfigurationSelectionOrdered;
+    PHPickerViewController *p = [[PHPickerViewController alloc] initWithConfiguration:cfg];
+    p.delegate = self;
+    [self presentViewController:p animated:YES completion:nil];
+}
+
+- (void)pickFilesOfTypes:(NSArray<UTType *> *)types then:(void (^)(NSArray<NSURL *> *urls))done multiple:(BOOL)multiple {
+    self.filesHandler = done;
+    UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+    p.allowsMultipleSelection = multiple;
+    p.delegate = self;
+    [self presentViewController:p animated:YES completion:nil];
+}
+
+- (void)buildSounds:(NSMutableArray *)S {
+    __weak typeof(self) ws = self;
+    FlideSound *Snd = [FlideSound shared];
+    FRow *vol = [FRow slider:L(@"Громкость звуков FLIDE") key:kSndVol min:0 max:1 step:0.05 def:0.8 fmt:@"percent"];
+    vol.icon = @"speaker.wave.2";
+    FRow *master = [FRow toggle:L(@"🔊 Свои звуки") sub:L(@"Звуки FLIDE поверх звуков игры") key:kSndOn];
+    [S addObject:[FSection title:nil rows:@[master, vol]
+                          footer:L(@"Звуки играются только у тебя. Стандартные синтезируются кодом, свои — любой аудиофайл из «Файлов».")]];
+
+    NSMutableArray *rows = [NSMutableArray new];
+    for (NSDictionary *ev in [Snd events]) {
+        NSString *eid = ev[@"id"];
+        FRow *r = [FRow title:ev[@"title"] sub:[NSString stringWithFormat:@"%@ · %@", [Snd sourceNameFor:eid], ev[@"sub"]] action:^(UIView *v) {
+            NSArray *opts = @[L(@"▶︎ Прослушать"), L(@"Стандартный звук FLIDE"), L(@"📁 Свой файл из «Файлов»"), L(@"Выключить")];
+            [ws choose:ev[@"title"] options:opts source:v done:^(NSInteger i) {
+                if (i == 0) { [Snd preview:eid]; return; }
+                if (i == 1) [Snd setMode:1 forEvent:eid];
+                if (i == 3) [Snd setMode:0 forEvent:eid];
+                if (i == 2) {
+                    [ws pickFilesOfTypes:@[UTTypeAudio] then:^(NSArray<NSURL *> *urls) {
+                        BOOL ok = [Snd setCustomFile:urls.firstObject forEvent:eid];
+                        [ws toast:ok ? L(@"Звук поставлен ✦") : L(@"Этот файл не открывается")];
+                        if (ok) [Snd preview:eid];
+                        [ws reload];
+                    } multiple:NO];
+                    return;
+                }
+                [ws reload];
+            }];
+        }];
+        r.icon = @"music.note";
+        [rows addObject:r];
+    }
+    [S addObject:[FSection title:L(@"События") rows:rows
+                          footer:L(@"У броска карты и кнопки UNO в игре уже есть свои звуки, поэтому по умолчанию они выключены — включи, если хочешь свой.")]];
+
+    BOOL ok = [Snd gameVolumeSupported];
+    FRow *gv = [FRow slider:L(@"Громкость игры") key:kGameVol min:0 max:1 step:0.05 def:1 fmt:@"percent"];
+    gv.changed = ^{ [[FlideSound shared] applyGameVolume]; };
+    gv.icon = @"speaker.wave.3";
+    [S addObject:[FSection title:L(@"Игра") rows:ok ? @[gv] : @[]
+                          footer:ok ? L(@"Масштабирует громкость всех AudioSource игры. Если игра сама задаёт громкость, значение может возвращаться.")
+                                    : L(@"Недоступно: в этой версии игры нет нужных методов AudioSource (или игра ещё не загрузилась).")]];
 }
 
 #pragma mark Настройки
@@ -2304,6 +2423,7 @@ static NSMutableArray<FlideItem *> *gFindItems;
     [root addSubview:p];
     [p.vc didMoveToParentViewController:gOverlay.rootViewController];
     [gPanels addObject:p];
+    if (animated) [[FlideSound shared] play:@"menu"];
     if (gLauncher) [root bringSubviewToFront:gLauncher];
     if (animated && ([FDefaults() objectForKey:kUIAnim] ? FBool(kUIAnim) : YES)) {
         p.alpha = 0;

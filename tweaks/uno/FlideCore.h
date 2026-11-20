@@ -46,6 +46,11 @@
 #define kUIScale      @"flide.ui.scale"      // 0 компактно, 1 обычно, 2 крупно
 #define kUILabels     @"flide.ui.labels"     // подписи в панели запуска
 #define kUIAnim       @"flide.ui.anim"
+#define kSndOn        @"flide.snd.on"
+#define kSndVol       @"flide.snd.vol"
+#define kSndMap       @"flide.snd.map"       // событие -> {mode}
+#define kGameVol      @"flide.game.vol"      // масштаб громкости AudioSource игры
+#define kStickerPack  @"flide.sticker.pack"
 #define kUIOrder      @"flide.ui.order"      // порядок иконок панели
 #define kUIHidden     @"flide.ui.hidden"     // скрытые иконки
 #define kQuickBar     @"flide.quick"         // быстрая кнопка эмоций на столе
@@ -205,6 +210,36 @@ NSString *FlideFxStyleName(FlideFxStyle s);
 - (NSString *)slotFromImage:(UIImage *)img;
 - (CGPoint)myPoint;
 - (NSArray<NSValue *> *)opponentPoints;
+@end
+
+// ---------- звуки ----------
+@interface FlideSound : NSObject
++ (instancetype)shared;
+- (void)start;
+- (NSArray<NSDictionary *> *)events;
+- (void)play:(NSString *)event;
+- (void)preview:(NSString *)event;
+- (NSString *)sourceNameFor:(NSString *)event;
+- (void)setMode:(NSInteger)mode forEvent:(NSString *)event;   // 0 выкл, 1 стандартный, 2 свой файл
+- (BOOL)setCustomFile:(NSURL *)url forEvent:(NSString *)event;
+- (void)tapAt:(CGPoint)p;                                       // тап по кнопке UNO
+- (BOOL)gameVolumeSupported;
+- (void)applyGameVolume;
+@end
+
+// ---------- стикер-паки ----------
+@class PHPickerResult;
+UIImage *FlideLoadImage(NSString *path, CGFloat maxSide);       // GIF → анимированный UIImage
+@interface FlideStickers : NSObject
++ (instancetype)shared;
+- (NSArray<NSString *> *)packs;
+- (NSString *)createPack:(NSString *)name;
+- (void)deletePack:(NSString *)pack;
+- (NSArray<NSString *> *)filesInPack:(NSString *)pack;
+- (void)removeFile:(NSString *)path;
+- (BOOL)addData:(NSData *)data ext:(NSString *)ext toPack:(NSString *)pack;
+- (NSUInteger)importURLs:(NSArray<NSURL *> *)urls intoPack:(NSString *)pack;
+- (void)importPickerResults:(NSArray<PHPickerResult *> *)results intoPack:(NSString *)pack completion:(void (^)(NSUInteger n))done;
 @end
 
 // ---------- быстрая панель эмоций/подарков на столе ----------

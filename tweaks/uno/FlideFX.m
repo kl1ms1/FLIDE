@@ -490,8 +490,8 @@ static CFTimeInterval gLastTrail;
 static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
     ((void (*)(id, SEL, UIEvent *))gOrigSendEvent)(self, _cmd, event);
     if (event.type != UIEventTypeTouches || [FlideMenu isOverlayWindow:self]) return;
-    BOOL sparks = FBool(kFxTouch), trail = FBool(kFunTrail) || FBool(kFunParty);
-    if (!sparks && !trail) return;
+    BOOL sparks = FBool(kFxTouch), trail = FBool(kFunTrail) || FBool(kFunParty), snd = FBool(kSndOn);
+    if (!sparks && !trail && !snd) return;
     for (UITouch *t in event.allTouches) {
         NSValue *key = [NSValue valueWithNonretainedObject:t];
         CGPoint p = [t locationInView:nil];
@@ -499,14 +499,15 @@ static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
             CFTimeInterval now = CACurrentMediaTime();
             if (now - gLastTrail > 0.016) { gLastTrail = now; [[FlideFX shared] trailAt:p]; }
         }
-        if (!sparks) continue;
         if (t.phase == UITouchPhaseBegan) gTouchStart[key] = [NSValue valueWithCGPoint:p];
         else if (t.phase == UITouchPhaseEnded || t.phase == UITouchPhaseCancelled) {
             NSValue *s = gTouchStart[key];
             [gTouchStart removeObjectForKey:key];
             if (!s) continue;
             CGPoint a = s.CGPointValue;
-            if (hypot(p.x - a.x, p.y - a.y) > 40) [[FlideFX shared] cardThrownAt:p];
+            if (hypot(p.x - a.x, p.y - a.y) > 40) {
+                if (sparks) [[FlideFX shared] cardThrownAt:p]; else [[FlideSound shared] play:@"throw"];
+            } else if (t.phase == UITouchPhaseEnded) [[FlideSound shared] tapAt:p];
         }
     }
 }
@@ -633,6 +634,7 @@ static void flideSendEvent(UIWindow *self, SEL _cmd, UIEvent *event) {
         [h impactOccurred];
     }
     if (big && FBool(kFunShake)) [[FlideFun shared] shakeScreen];
+    [[FlideSound shared] play:big ? @"combo" : @"throw"];
     [[FlideFun shared] countThrow:combo];
 }
 
