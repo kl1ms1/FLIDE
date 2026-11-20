@@ -441,6 +441,18 @@ NSString *FlideL(NSString *ru) {
     @"Яйцо": @"Egg",
     @"Помидор": @"Tomato",
     @"Бомба": @"Bomb",
+    @"🎯 Тапни по элементу в игре": @"🎯 Tap an element in the game",
+    @"Ничего не нашёл — попробуй ещё раз": @"Found nothing — try again",
+    @"Что именно?": @"Which one?",
+    @"Под пальцем несколько слоёв — выбери нужный": @"Several layers under your finger — pick one",
+    @"✏️ Текст: «%@»": @"✏️ Text: «%@»",
+    @"Текст заменён ✦": @"Text replaced ✦",
+    @"🖼 Текстура: %@": @"🖼 Texture: %@",
+    @"🧩 Двигать / размер / анимация": @"🧩 Move / size / animation",
+    @"Спрятано. Вернуть: «🧩 Интерфейс игры»": @"Hidden. Undo in «🧩 Game interface»",
+    @"👤 Это мой аватар": @"👤 This is my avatar",
+    @"Запомнил: эмоции будут у этого аватара": @"Got it: emotes will appear at this avatar",
+    @"🎓 Это экран победы": @"🎓 This is the victory screen",
     };
     return en[ru] ?: ru;
 }

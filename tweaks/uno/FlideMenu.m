@@ -30,6 +30,11 @@ static NSString *tabTitle(FTab t) {
 @interface FlideMenu (Private)
 + (NSArray<NSNumber *> *)tabOrder;
 + (void)editLayoutPath:(NSString *)path;
++ (void)startFind;
++ (void)endFind;
++ (void)findPicked:(CGPoint)p;
++ (void)findActions:(FlideItem *)it at:(CGPoint)pt;
++ (void)present:(UIAlertController *)a at:(CGPoint)pt;
 @end
 
 static NSString *tabIcon(FTab t) { return [tabTitle(t) componentsSeparatedByString:@" "].firstObject; }
@@ -1820,6 +1825,59 @@ void FlideToast(NSString *msg) {
 }
 @end
 
+#pragma mark - «Найти на экране»
+
+@interface FlideFindView : UIView
+@property (nonatomic, copy) void (^picked)(CGPoint p);
+@property (nonatomic, copy) void (^cancelled)(void);
+@end
+
+@implementation FlideFindView
+- (instancetype)initWithFrame:(CGRect)f {
+    if ((self = [super initWithFrame:f])) {
+        self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.16];
+        self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        UIView *pill = FlideGlass(20);
+        UILabel *l = [UILabel new];
+        l.text = L(@"🎯 Тапни по элементу в игре");
+        l.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+        l.textColor = UIColor.whiteColor;
+        [l sizeToFit];
+        UIButton *x = [UIButton buttonWithType:UIButtonTypeSystem];
+        [x setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];
+        x.tintColor = [UIColor colorWithWhite:1 alpha:0.8];
+        [x addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchUpInside];
+        CGFloat w = l.bounds.size.width + 76;
+        pill.frame = CGRectMake((f.size.width - w) / 2, 14, w, 40);
+        l.frame = CGRectMake(18, 9, l.bounds.size.width, 22);
+        x.frame = CGRectMake(w - 40, 2, 36, 36);
+        UIView *c = [pill isKindOfClass:UIVisualEffectView.class] ? ((UIVisualEffectView *)pill).contentView : pill;
+        [c addSubview:l]; [c addSubview:x];
+        pill.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
+        [self addSubview:pill];
+    }
+    return self;
+}
+- (void)cancel { if (self.cancelled) self.cancelled(); }
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    CGPoint p = [touches.anyObject locationInView:self];
+    // кольцо под пальцем — видно, куда попал
+    CAShapeLayer *ring = [CAShapeLayer layer];
+    ring.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(-20, -20, 40, 40)].CGPath;
+    ring.position = p;
+    ring.fillColor = UIColor.clearColor.CGColor;
+    ring.strokeColor = FlideAccent().CGColor;
+    ring.lineWidth = 3;
+    [self.layer addSublayer:ring];
+    CABasicAnimation *sc = [CABasicAnimation animationWithKeyPath:@"transform.scale"]; sc.toValue = @2.2;
+    CABasicAnimation *op = [CABasicAnimation animationWithKeyPath:@"opacity"]; op.toValue = @0;
+    CAAnimationGroup *g = [CAAnimationGroup animation];
+    g.animations = @[sc, op]; g.duration = 0.35;
+    [ring addAnimation:g forKey:nil];
+    if (self.picked) self.picked(p);
+}
+@end
+
 #pragma mark - панель запуска и управление окнами
 
 @implementation FlideMenu
@@ -1946,6 +2004,31 @@ static UIWindow *gameWindow(void) {
         [b addTarget:self action:@selector(release:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
         [st addArrangedSubview:b];
     }
+    UIButton *fb = [UIButton buttonWithType:UIButtonTypeCustom];
+    [fb.widthAnchor constraintEqualToConstant:itemW].active = YES;
+    [fb.heightAnchor constraintEqualToConstant:barH - 8].active = YES;
+    UILabel *fic = [UILabel new];
+    fic.text = @"🎯";
+    fic.font = [UIFont systemFontOfSize:labels ? 22 : 24];
+    fic.textAlignment = NSTextAlignmentCenter;
+    fic.frame = CGRectMake(0, labels ? 4 : 6, itemW, 28);
+    fic.userInteractionEnabled = NO;
+    [fb addSubview:fic];
+    if (labels) {
+        UILabel *flb = [UILabel new];
+        flb.text = L(@"Найти");
+        flb.font = [UIFont systemFontOfSize:9.5 weight:UIFontWeightSemibold];
+        flb.textColor = [UIColor colorWithWhite:1 alpha:0.85];
+        flb.textAlignment = NSTextAlignmentCenter;
+        flb.frame = CGRectMake(2, 34, itemW - 4, 14);
+        flb.userInteractionEnabled = NO;
+        [fb addSubview:flb];
+    }
+    fb.layer.cornerRadius = 14;
+    [fb addTarget:self action:@selector(startFind) forControlEvents:UIControlEventTouchUpInside];
+    [fb addTarget:self action:@selector(press:) forControlEvents:UIControlEventTouchDown];
+    [fb addTarget:self action:@selector(release:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+    [st addArrangedSubview:fb];
     UIButton *x = [UIButton buttonWithType:UIButtonTypeSystem];
     [x setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];
     x.tintColor = [UIColor colorWithWhite:1 alpha:0.6];
@@ -1953,7 +2036,7 @@ static UIWindow *gameWindow(void) {
     [x addTarget:self action:@selector(hideLauncher) forControlEvents:UIControlEventTouchUpInside];
     [st addArrangedSubview:x];
 
-    CGFloat w = 84 + shown * (itemW + 2) + 40 + 20;
+    CGFloat w = 84 + (shown + 1) * (itemW + 2) + 40 + 20;
     CGFloat maxW = root.bounds.size.width - 24;
     UIScrollView *sc = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, MIN(w, maxW), barH)];
     sc.showsHorizontalScrollIndicator = NO;
@@ -1980,6 +2063,167 @@ static UIWindow *gameWindow(void) {
         } completion:nil];
     }
     [self updateKey];
+}
+
+static FlideFindView *gFind;
+static NSMutableArray<FlideItem *> *gFindItems;
+
++ (void)startFind {
+    [self ensureOverlay];
+    if (gFind || !FIL_Ready()) return;
+    UIView *root = gOverlay.rootViewController.view;
+    if (gLauncher) [self hideLauncher];
+    for (FlidePanel *p in gPanels) if (!p.collapsed) [p toggleCollapse]; // чтобы видеть игру
+    FlideFindView *f = [[FlideFindView alloc] initWithFrame:root.bounds];
+    f.picked = ^(CGPoint p) { [self findPicked:p]; };
+    f.cancelled = ^{ [self endFind]; };
+    [root addSubview:f];
+    gFind = f;
+    [gOverlay makeKeyWindow];
+    gFlideMenuVisible = YES;
+}
+
++ (void)endFind {
+    [gFind removeFromSuperview];
+    gFind = nil;
+    [[FlideEngine shared] releaseItems:gFindItems];
+    gFindItems = nil;
+    [self updateKey];
+}
+
+// все видимые элементы UI под пальцем, самый вложенный — первым
++ (NSArray<FlideItem *> *)findHitsAt:(CGPoint)p {
+    NSMutableArray<FlideItem *> *hits = [NSMutableArray new];
+    for (NSValue *v in FIL_FindAll("UnityEngine.UI", "Graphic")) {
+        void *o = v.pointerValue;
+        if (!FIL_ActiveInHierarchy(o) || !FIL_ContainsUIPoint(o, p)) continue;
+        FlideItem *it = [FlideItem new];
+        it.name = FIL_Path(o);
+        it.detail = @(FIL_ClassName(FIL_ClassOf(o)));
+        it.instanceID = FIL_InstanceID(o);
+        it.handle = FIL_Pin(o);
+        [hits addObject:it];
+    }
+    [hits sortUsingComparator:^NSComparisonResult(FlideItem *a, FlideItem *b) {
+        NSUInteger da = [a.name componentsSeparatedByString:@"/"].count, db = [b.name componentsSeparatedByString:@"/"].count;
+        return da == db ? NSOrderedSame : (da < db ? NSOrderedDescending : NSOrderedAscending);
+    }];
+    if (hits.count > 8) {
+        [[FlideEngine shared] releaseItems:[hits subarrayWithRange:NSMakeRange(8, hits.count - 8)]];
+        [hits removeObjectsInRange:NSMakeRange(8, hits.count - 8)];
+    }
+    return hits;
+}
+
++ (void)present:(UIAlertController *)a at:(CGPoint)pt {
+    UIViewController *vc = gOverlay.rootViewController;
+    a.popoverPresentationController.sourceView = vc.view;
+    a.popoverPresentationController.sourceRect = CGRectMake(pt.x, pt.y, 1, 1);
+    [vc presentViewController:a animated:YES completion:nil];
+}
+
++ (void)findPicked:(CGPoint)p {
+    [gFind removeFromSuperview];
+    gFind = nil;
+    NSMutableArray *hits = [[self findHitsAt:p] mutableCopy];
+    [[FlideEngine shared] releaseItems:gFindItems];
+    gFindItems = hits;
+    if (!hits.count) { FlideToast(L(@"Ничего не нашёл — попробуй ещё раз")); [self endFind]; return; }
+    if (hits.count == 1) { [self findActions:hits.firstObject at:p]; return; }
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:L(@"Что именно?") message:L(@"Под пальцем несколько слоёв — выбери нужный")
+                                                        preferredStyle:UIAlertControllerStyleActionSheet];
+    for (FlideItem *it in hits)
+        [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ · %@", it.name.lastPathComponent, it.detail]
+                                              style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+            CGPoint c; if ([[FlideEngine shared] screenPointForItem:it point:&c]) [[FlideFX shared] highlightAt:c];
+            [self findActions:it at:p];
+        }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) { [self endFind]; }]];
+    [self present:a at:p];
+}
+
++ (void)findActions:(FlideItem *)it at:(CGPoint)pt {
+    UIViewController *vc = gOverlay.rootViewController;
+    void *o = FIL_Target(it.handle);
+    NSString *text = o ? FIL_ToNSString(FIL_Call0(o, "get_text")) : nil;
+    NSString *path = it.name;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:path.lastPathComponent
+        message:[NSString stringWithFormat:@"%@\n%@", it.detail, friendlyPath(path)] preferredStyle:UIAlertControllerStyleActionSheet];
+
+    if (text) [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:L(@"✏️ Текст: «%@»"), text.length > 22 ? [[text substringToIndex:22] stringByAppendingString:@"…"] : text]
+                                                    style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        UIAlertController *t = [UIAlertController alertControllerWithTitle:L(@"Текст в игре") message:nil preferredStyle:UIAlertControllerStyleAlert];
+        [t addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.text = text; tf.clearButtonMode = UITextFieldViewModeAlways; }];
+        [t addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:^(UIAlertAction *y) { [self endFind]; }]];
+        [t addAction:[UIAlertAction actionWithTitle:L(@"Сохранить") style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
+            [[FlideEngine shared] setOverride:t.textFields.firstObject.text forPath:path];
+            FlideToast(L(@"Текст заменён ✦"));
+            [self endFind];
+        }]];
+        [vc presentViewController:t animated:YES completion:nil];
+    }]];
+
+    // текстура: у Image — через спрайт, у RawImage — напрямую. Спрайты лежат в общих атласах,
+    // поэтому заменится весь атлас целиком (так устроены UI-текстуры игры)
+    void *sprite = o ? FIL_Call0(o, "get_sprite") : NULL;
+    void *tex = sprite ? FIL_Call0(sprite, "get_texture") : (o ? FIL_Call0(o, "get_texture") : NULL);
+    if (tex) [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:L(@"🖼 Текстура: %@"), FIL_Name(tex)]
+                                                   style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        FlideItem *ti = [FlideItem new];
+        ti.name = FIL_Name(tex);
+        ti.detail = [NSString stringWithFormat:@"%d×%d", FIL_Int(FIL_Call0(tex, "get_width")), FIL_Int(FIL_Call0(tex, "get_height"))];
+        ti.instanceID = FIL_InstanceID(tex);
+        ti.handle = FIL_Pin(tex);
+        [gFindItems addObject:ti];
+        FlideTextureEditor *e = [FlideTextureEditor editorForItem:ti onChange:^{ [self endFind]; }];
+        [vc presentViewController:e animated:YES completion:nil];
+    }]];
+
+    [a addAction:[UIAlertAction actionWithTitle:L(@"🧩 Двигать / размер / анимация") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        [self editLayoutPath:path];
+        [self endFind];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"🙈 Спрятать") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        [[FlideLayout shared] setRule:@{@"hide": @YES} forPath:path];
+        FlideToast(L(@"Спрятано. Вернуть: «🧩 Интерфейс игры»"));
+        [self endFind];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"✨ Аура") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        UIAlertController *st = [UIAlertController alertControllerWithTitle:L(@"Стиль эффекта") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+        for (NSInteger k = 0; k < FlideFxStyleCount; k++)
+            [st addAction:[UIAlertAction actionWithTitle:FlideFxStyleName(k) style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
+                NSMutableDictionary *d = [[FDefaults() dictionaryForKey:kAuras] mutableCopy] ?: [NSMutableDictionary new];
+                d[path] = @{ @"style": @(k), @"color": [FDefaults() stringForKey:kFxColor] ?: @"#7CF7FF", @"radius": @46 };
+                [FDefaults() setObject:d forKey:kAuras];
+                [[FlideFX shared] reloadRules];
+                FlideToast(L(@"Аура добавлена ✦"));
+                [self endFind];
+            }]];
+        [st addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:^(UIAlertAction *y) { [self endFind]; }]];
+        [self present:st at:pt];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"🕶 Скрыть как ник (стример)") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        NSMutableArray *sp = [[FDefaults() arrayForKey:kStreamerPaths] mutableCopy] ?: [NSMutableArray new];
+        if (![sp containsObject:path]) [sp addObject:path];
+        [FDefaults() setObject:sp forKey:kStreamerPaths];
+        [FDefaults() setBool:YES forKey:kStreamer];
+        FlideToast(L(@"Режим стримера: этот ник скрыт"));
+        [self endFind];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"👤 Это мой аватар") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        [FDefaults() setObject:path forKey:kMyAvatar];
+        FlideToast(L(@"Запомнил: эмоции будут у этого аватара"));
+        [self endFind];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"🎓 Это экран победы") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        NSArray *c = [path componentsSeparatedByString:@"/"];
+        [FDefaults() setObject:c.count > 2 ? [[c subarrayWithRange:NSMakeRange(0, 3)] componentsJoinedByString:@"/"] : path forKey:kVictoryPath];
+        [FDefaults() setBool:YES forKey:kFunConfetti];
+        FlideToast(L(@"Запомнил! Анимация будет при появлении этого экрана"));
+        [self endFind];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:L(@"Отмена") style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) { [self endFind]; }]];
+    [self present:a at:pt];
 }
 
 + (void)press:(UIButton *)b {
