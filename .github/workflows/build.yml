@@ -40,7 +40,7 @@ jobs:
             -I "tweaks/$APP" \
             -framework Foundation -framework UIKit -framework QuartzCore \
             -framework CoreGraphics -framework PhotosUI -framework CoreImage \
-            -framework ImageIO -framework ReplayKit -framework UniformTypeIdentifiers -framework CoreMotion \
+            -framework ImageIO -framework ReplayKit -framework UniformTypeIdentifiers -framework CoreMotion -framework AVFoundation \
             -install_name "@executable_path/Frameworks/FLIDE-$APP.dylib" \
             -o "build/FLIDE-$APP.dylib" $SRC
           codesign -f -s - "build/FLIDE-$APP.dylib"
