@@ -59,6 +59,7 @@ int FIL_InstanceID(Il2CppObject *unityObj);
 NSString *FIL_Path(Il2CppObject *component);  // Canvas/Panel/Coins/Text
 BOOL FIL_ActiveInHierarchy(Il2CppObject *component);
 BOOL FIL_ScreenPoint(Il2CppObject *component, CGPoint *outPointInUIKit); // центр элемента в точках UIKit
+BOOL FIL_ContainsUIPoint(Il2CppObject *component, CGPoint uiPoint);       // попадает ли тап (точки UIKit) в элемент
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,53 @@
+name: Extract all textures
+
+# Достаёт ВСЕ текстуры прямо из файлов игры — не нужно открывать каждое меню.
+# Результат: артефакт FLIDE-textures-<раздел>.zip (папки ui, tables, cards, emoji…).
+# Отредактируй нужные PNG, оставь только их и импортируй папку в FLIDE как пак.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег релиза с .ipa"
+        required: true
+        default: IPA
+      asset:
+        description: "Имя или маска .ipa"
+        required: true
+        default: "*uno*.ipa"
+      filter:
+        description: "Только текстуры с этим словом (пусто — все). Например: card, table, emoji"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download IPA
+        run: |
+          set -euo pipefail
+          gh release download "${{ inputs.release_tag }}" --repo "$GITHUB_REPOSITORY" --pattern "${{ inputs.asset }}" --dir in
+          ls -la in
+
+      - name: Extract
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet UnityPy
+          python3 tools/extract_textures.py "$(ls in/*.ipa | head -1)" out "${{ inputs.filter }}"
+          du -sh out; ls out
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLIDE-textures${{ inputs.filter && format('-{0}', inputs.filter) || '' }}
+          path: out
+          retention-days: 5

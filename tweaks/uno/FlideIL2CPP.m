@@ -277,3 +277,30 @@ BOOL FIL_ScreenPoint(Il2CppObject *component, CGPoint *out) {
     out->y = (sh - sy) * ui.height / sh;
     return YES;
 }
+
+// Обратное преобразование: точка UIKit → пиксели Unity, затем
+// RectTransformUtility.RectangleContainsScreenPoint(rect, point, camera)
+BOOL FIL_ContainsUIPoint(Il2CppObject *component, CGPoint ui) {
+    int sw = FIL_Int(FIL_Static("UnityEngine", "Screen", "get_width", 0, NULL));
+    int sh = FIL_Int(FIL_Static("UnityEngine", "Screen", "get_height", 0, NULL));
+    if (sw <= 0 || sh <= 0) return NO;
+    CGSize sz = UIScreen.mainScreen.bounds.size;
+    if ((sw > sh) != (sz.width > sz.height)) sz = CGSizeMake(sz.height, sz.width);
+    FVec2 sp = { (float)(ui.x * sw / sz.width), (float)(sh - ui.y * sh / sz.height) };
+    Il2CppObject *rt = FIL_Call0(component, "get_transform");
+    Il2CppObject *canvas = FIL_Call0(component, "get_canvas");
+    Il2CppObject *root = canvas ? (FIL_Call0(canvas, "get_rootCanvas") ?: canvas) : NULL;
+    int mode = root ? FIL_Int(FIL_Call0(root, "get_renderMode")) : 0;
+    Il2CppObject *cam = NULL;
+    if (mode != 0) {
+        cam = root ? FIL_Call0(root, "get_worldCamera") : NULL;
+        if (!cam) cam = FIL_Static("UnityEngine", "Camera", "get_main", 0, NULL);
+    }
+    const MethodInfo *m = FIL_MethodSig(FIL_Class("UnityEngine", "RectTransformUtility"), "RectangleContainsScreenPoint",
+                                        "UnityEngine.RectTransform,UnityEngine.Vector2,UnityEngine.Camera");
+    if (!m || !rt) return NO;
+    void *args[3] = { rt, &sp, cam };
+    BOOL ok = NO;
+    Il2CppObject *r = FIL_Invoke(m, NULL, args, &ok);
+    return ok && FIL_Bool(r);
+}
